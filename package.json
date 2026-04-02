@@ -1,0 +1,12 @@
+{
+  "name": "image-tester",
+  "private": true,
+  "description": "图片 Agent 测试平台：根目录一键同时启动 server + web",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev --prefix server\" \"npm run dev --prefix web\"",
+    "build": "npm run build --prefix server && npm run build --prefix web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

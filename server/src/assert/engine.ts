@@ -1,0 +1,146 @@
+import { JSONPath } from 'jsonpath-plus';
+import { config } from '../config.js';
+import type { AssertionConfig, AssertionRule } from '../model/types.js';
+import { evalCustomAssertionExpression } from './customScript.js';
+
+export interface RuleResult {
+  rule: AssertionRule;
+  ok: boolean;
+  detail: string;
+}
+
+function tryParseJson(text: string): unknown | undefined {
+  const t = text.trim();
+  if (!t) return undefined;
+  try {
+    return JSON.parse(t) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function applyJsonPath(path: string, data: unknown): unknown {
+  const res = JSONPath({ path, json: data as object | unknown[], wrap: false });
+  if (Array.isArray(res)) {
+    return res.length <= 1 ? res[0] : res;
+  }
+  return res;
+}
+
+export function evaluateAssertionConfig(
+  outputText: string,
+  rules: AssertionRule[],
+  caseVars: Record<string, string>,
+): { pass: boolean; results: RuleResult[] } {
+  const parsedJson = tryParseJson(outputText);
+  const results: RuleResult[] = [];
+
+  for (const rule of rules) {
+    const r = evaluateRule(outputText, parsedJson, caseVars, rule);
+    results.push(r);
+  }
+
+  return { pass: results.every((x) => x.ok), results };
+}
+
+function evaluateRule(
+  outputText: string,
+  parsedJson: unknown,
+  caseVars: Record<string, string>,
+  rule: AssertionRule,
+): RuleResult {
+  switch (rule.type) {
+    case 'contains': {
+      const hay = rule.caseInsensitive ? outputText.toLowerCase() : outputText;
+      const needle = rule.caseInsensitive ? rule.value.toLowerCase() : rule.value;
+      const hit = hay.includes(needle);
+      const ok = rule.negate ? !hit : hit;
+      return {
+        rule,
+        ok,
+        detail: ok ? '包含校验通过' : rule.negate ? '不应包含却包含' : '未包含期望文本',
+      };
+    }
+    case 'regex': {
+      if (rule.pattern.length > config.maxRegexPatternLength) {
+        return { rule, ok: false, detail: `正则过长（>${config.maxRegexPatternLength}）` };
+      }
+      try {
+        const re = new RegExp(rule.pattern, rule.flags);
+        const ok = re.test(outputText);
+        return { rule, ok, detail: ok ? '正则匹配通过' : '正则不匹配' };
+      } catch (e) {
+        return { rule, ok: false, detail: `正则无效：${(e as Error).message}` };
+      }
+    }
+    case 'jsonPath': {
+      if (parsedJson === undefined) {
+        return { rule, ok: false, detail: '输出不是合法 JSON，无法使用 jsonPath' };
+      }
+      let value: unknown;
+      try {
+        value = applyJsonPath(rule.path, parsedJson);
+      } catch (e) {
+        return { rule, ok: false, detail: `jsonPath 失败：${(e as Error).message}` };
+      }
+      if (rule.equalsCaseVar != null) {
+        const expected = caseVars[rule.equalsCaseVar] ?? '';
+        const ok = String(value) === String(expected);
+        return {
+          rule,
+          ok,
+          detail: ok
+            ? `字段与用例变量 ${rule.equalsCaseVar} 一致`
+            : `字段值为 ${JSON.stringify(value)}，期望等于变量「${rule.equalsCaseVar}」=${JSON.stringify(expected)}`,
+        };
+      }
+      if (rule.equals != null) {
+        const ok = String(value) === rule.equals;
+        return { rule, ok, detail: ok ? '字段等于期望值' : `字段值为 ${JSON.stringify(value)}` };
+      }
+      if (rule.inList != null) {
+        const ok = rule.inList.map(String).includes(String(value));
+        return { rule, ok, detail: ok ? '字段在允许列表内' : `字段值 ${JSON.stringify(value)} 不在列表中` };
+      }
+      if (rule.regex != null) {
+        if (rule.regex.length > config.maxRegexPatternLength) {
+          return { rule, ok: false, detail: `正则过长（>${config.maxRegexPatternLength}）` };
+        }
+        try {
+          const re = new RegExp(rule.regex);
+          const ok = re.test(String(value));
+          return { rule, ok, detail: ok ? '字段正则匹配' : '字段正则不匹配' };
+        } catch (e) {
+          return { rule, ok: false, detail: `字段正则无效：${(e as Error).message}` };
+        }
+      }
+      if (rule.numericEquals != null) {
+        const num = Number(value);
+        const ok = Number.isFinite(num) && num === rule.numericEquals;
+        return { rule, ok, detail: ok ? '数值相等' : `期望数值 ${rule.numericEquals}，实际 ${String(value)}` };
+      }
+      const ok = value !== undefined && value !== null && value !== '';
+      return { rule, ok, detail: ok ? '路径存在且非空' : '路径不存在或为空' };
+    }
+    case 'customScript': {
+      try {
+        const ok = evalCustomAssertionExpression(rule.expression, { outputText, parsedJson, caseVars });
+        return { rule, ok, detail: ok ? '自定义表达式为真' : '自定义表达式为假' };
+      } catch (e) {
+        return { rule, ok: false, detail: `自定义表达式执行失败：${(e as Error).message}` };
+      }
+    }
+    default: {
+      const _never: never = rule;
+      return { rule: _never, ok: false, detail: '未知规则类型' };
+    }
+  }
+}
+
+export function parseAssertionConfig(raw: string): AssertionConfig {
+  const data = JSON.parse(raw || '{"rules":[]}') as unknown;
+  if (!data || typeof data !== 'object' || !Array.isArray((data as AssertionConfig).rules)) {
+    throw new Error('断言配置必须是 { "rules": [...] }');
+  }
+  return data as AssertionConfig;
+}

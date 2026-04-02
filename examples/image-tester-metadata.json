@@ -1,0 +1,10 @@
+{
+  "门店/价签1.png": {
+    "variables": { "scene": "门店", "hint": "价签是否清晰" },
+    "images": { "ref": "标准样例/价签参考.png" }
+  },
+  "其它/招牌.jpg": {
+    "variables": { "storeName": "示例店名" },
+    "images": {}
+  }
+}

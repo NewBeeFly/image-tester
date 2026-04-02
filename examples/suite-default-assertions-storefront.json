@@ -1,0 +1,14 @@
+{
+  "rules": [
+    {
+      "type": "jsonPath",
+      "path": "$.isStorefront",
+      "equals": "true"
+    },
+    {
+      "type": "jsonPath",
+      "path": "$.storeName",
+      "equalsCaseVar": "storeName"
+    }
+  ]
+}
