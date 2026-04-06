@@ -45,6 +45,11 @@ export async function delJson<T>(path: string): Promise<T> {
   return handle<T>(await fetch(path, { method: 'DELETE' }));
 }
 
+/** multipart/form-data（不要手动设置 Content-Type，浏览器会带 boundary） */
+export async function postFormData<T>(path: string, body: FormData): Promise<T> {
+  return handle<T>(await fetch(path, { method: 'POST', body }));
+}
+
 export type ProviderType = 'openai_compatible' | 'dashscope' | 'volcengine';
 
 export interface ProviderProfile {
@@ -73,6 +78,11 @@ export interface TestSuite {
   image_root: string;
   default_assertions_json: string;
   created_at: string;
+}
+
+/** GET /api/config */
+export interface AppConfig {
+  suite_parent_dir: string;
 }
 
 export interface TestCase {

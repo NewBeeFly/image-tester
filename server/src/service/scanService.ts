@@ -2,7 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { resolveUnderRoot } from '../utils/pathSafe.js';
 
-const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+/** 与上传、扫描一致的图片扩展名（小写，含点） */
+export const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+
+export function isAllowedImageFilename(name: string): boolean {
+  return IMAGE_EXT.has(path.extname(name).toLowerCase());
+}
 
 export async function scanImagesUnderSuiteRoot(
   imageRoot: string,

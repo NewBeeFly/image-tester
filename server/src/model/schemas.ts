@@ -22,13 +22,25 @@ export const createPromptProfileSchema = z.object({
 
 export const updatePromptProfileSchema = createPromptProfileSchema.partial();
 
-export const createTestSuiteSchema = z.object({
-  name: z.string().min(1),
-  image_root: z.string().min(1),
+export const createTestSuiteSchema = z
+  .object({
+    name: z.string().min(1),
+    /** 自定义图片根（绝对或相对启动目录） */
+    image_root: z.string().min(1).optional(),
+    /** 托管在「测试集根目录」下的子文件夹名，与 image_root 二选一 */
+    managed_subdir: z.string().min(1).optional(),
+    default_assertions_json: z.string().optional(),
+  })
+  .refine(
+    (d) => Boolean(d.image_root?.trim()) || Boolean(d.managed_subdir?.trim()),
+    { message: '请填写「子目录名」或「自定义 image_root」其一' },
+  );
+
+export const updateTestSuiteSchema = z.object({
+  name: z.string().min(1).optional(),
+  image_root: z.string().min(1).optional(),
   default_assertions_json: z.string().optional(),
 });
-
-export const updateTestSuiteSchema = createTestSuiteSchema.partial();
 
 export const createTestCaseSchema = z.object({
   relative_image_path: z.string().min(1),

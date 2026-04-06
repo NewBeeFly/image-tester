@@ -6,9 +6,10 @@
 
 - **Provider 档案**：Base URL、默认模型、默认请求参数 JSON、API Key 对应的**环境变量名**（页面不保存密钥明文）。新建时按所选厂商（OpenAI / 阿里云 DashScope / 火山方舟）自动带出常用默认值，可再改；**已有档案支持编辑**。
 - **提示词模板**：系统 / 用户模板支持文本与多图占位符（见下节）；每条用例的 `variables_json` 存元数据。**已有模板支持编辑**。
-- **测试集**：指定本地 `image_root`，默认断言 JSON；用例含「主图相对路径」+ 元数据 JSON。**已有测试集与单条用例支持编辑**。可选在 `image_root` 下放 **`image-tester-metadata.json`** 或与主图同名的 **侧车 `.json`**，与库内元数据自动合并（见下文「本地元数据文件」）。
+- **测试集**：默认在**共用「测试集根目录」**（环境变量 `IMAGE_TESTER_SUITE_ROOT`，未设置时为项目内 `data/test-suites`）下为每个测试集创建**独立子目录**作为 `image_root`；也可用「高级」自行填写任意 `image_root`。用例含「主图相对路径」+ 元数据 JSON。**已有测试集与单条用例支持编辑**。可选在 `image_root` 下放 **`image-tester-metadata.json`** 或与主图同名的 **侧车 `.json`**，与库内元数据自动合并（见下文「本地元数据文件」）。
 - **单图检测**：不跑批量任务，即时调用模型查看输出（`POST /api/vision/preview`），规则与批量一致。
 - **目录扫描导入**：对 `image_root` 下（可选子目录）递归扫描常见图片后缀，勾选后一键生成用例（自动跳过已存在路径）。
+- **上传到 image_root**：在「测试集与用例」页可将图片或 JSON（侧车、根目录 `image-tester-metadata.json` / `metadata.json` 等）通过浏览器上传到当前测试集的磁盘目录（`POST /api/test-suites/:suiteId/upload`，multipart，字段 `relative_dir` 可选、文件字段 `files` 可多选）；支持**整文件夹上传**（保留子目录结构，文件名使用浏览器提供的相对路径）。**新建与编辑测试集已合并为同一表单**：顶部下拉选择「新建」或已有测试集；在新建未保存时也可直接点上传，系统会先按表单**自动创建测试集**再写入文件。上传后仍需**扫描导入**或手动添加用例，规则与仅放磁盘文件一致。
 - **批量运行**：并发调用模型（默认 SQLite + 进程内队列），SSE 推送进度事件；结果落库。**只会跑数据库里已存在的用例**；本地图片 + `image-tester-metadata.json` 不会自动生成用例，须先在「测试集与用例」里**扫描导入**或**手动添加**。
 - **断言引擎**：`contains` / `regex` / `jsonPath`（含 equals、inList、regex、numericEquals）/ `customScript`（受限 `vm` 表达式，超时见环境变量）。
 - **报告**：按运行查看通过/失败/错误数量、断言正确率（排除请求错误）、失败用例左图右文展示模型输出与断言明细。
@@ -118,6 +119,7 @@
 | 变量 | 说明 |
 | --- | --- |
 | `OPENAI_API_KEY` / `DASHSCOPE_API_KEY` / `VOLCENGINE_ARK_API_KEY` | 与 Provider 档案中的 `api_key_env` 对应，由后端从环境读取。 |
+| `IMAGE_TESTER_SUITE_ROOT` | 可选。托管模式新建测试集时，所有子目录的父路径（相对进程工作目录或绝对路径）；未设置时默认为项目根下 `data/test-suites`。 |
 | `PORT` | 后端端口，默认 `8787`。 |
 | `HOST` | 监听地址，默认 `127.0.0.1`。需要局域网内其他机器访问时设为 `0.0.0.0`。 |
 | `SQLITE_PATH` | SQLite 文件路径，默认 `server/data/app.db`（相对 `server` 工作目录时可调整）。 |

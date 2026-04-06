@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
+import { config } from '../config.js';
 import { parseAssertionConfig } from '../assert/engine.js';
 import {
   bulkImportCasesSchema,
@@ -22,6 +23,7 @@ import * as providersRepo from '../repository/providersRepo.js';
 import * as runsRepo from '../repository/runsRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import { scanImagesUnderSuiteRoot } from '../service/scanService.js';
+import { normalizeUploadSubdir, writeSuiteAsset } from '../service/suiteAssetUpload.js';
 import { runVisionPreview } from '../service/visionPreviewService.js';
 import { cancelRun, startTestRun, subscribeRun } from '../service/testRunService.js';
 import { mimeFromPath } from '../utils/mime.js';
@@ -36,6 +38,26 @@ function resolveImageRootInput(raw: string): string {
   return path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(process.cwd(), raw);
 }
 
+/** 托管在 testSuiteParentDir 下的子目录名（禁止路径分隔符等） */
+function sanitizeManagedSubdir(raw: string): string {
+  const s = raw
+    .trim()
+    .replace(/[/\\:*?"<>|\0]/g, '-')
+    .replace(/\s+/g, '-');
+  if (!s || s === '.' || s === '..') {
+    throw new Error('子目录名无效：请使用字母、数字、中文、横线等，不要包含路径符号');
+  }
+  return s;
+}
+
+function ensureManagedImageRoot(subdir: string): string {
+  const parent = config.testSuiteParentDir;
+  fs.mkdirSync(parent, { recursive: true });
+  const full = path.join(parent, subdir);
+  fs.mkdirSync(full, { recursive: true });
+  return full;
+}
+
 export function registerRoutes(app: FastifyInstance, db: Database.Database) {
   app.setErrorHandler((err, _req, reply) => {
     const e = err as Error & { statusCode?: number };
@@ -44,6 +66,11 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
   });
 
   app.get('/health', async () => ({ ok: true }));
+
+  /** 前端展示「测试集根目录」；新建托管测试集时子目录会建在该路径下 */
+  app.get('/api/config', async () => ({
+    suite_parent_dir: config.testSuiteParentDir,
+  }));
 
   app.post('/api/vision/preview', async (req) => {
     const body = parseOrThrow(visionPreviewSchema, req.body);
@@ -114,9 +141,28 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     if (body.default_assertions_json) {
       parseAssertionConfig(body.default_assertions_json);
     }
+    let imageRoot: string;
+    if (body.managed_subdir?.trim()) {
+      try {
+        const sub = sanitizeManagedSubdir(body.managed_subdir);
+        imageRoot = ensureManagedImageRoot(sub);
+      } catch (e) {
+        const err = new Error((e as Error).message || '子目录不合法');
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        throw err;
+      }
+    } else if (body.image_root?.trim()) {
+      imageRoot = resolveImageRootInput(body.image_root);
+      fs.mkdirSync(imageRoot, { recursive: true });
+    } else {
+      const err = new Error('请填写「子目录名」或「自定义 image_root」其一');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
     const row = suitesRepo.insertTestSuite(db, {
-      ...body,
-      image_root: resolveImageRootInput(body.image_root),
+      name: body.name,
+      image_root: imageRoot,
+      default_assertions_json: body.default_assertions_json,
     });
     invalidateCaseMetadataManifestCache();
     return row;
@@ -267,6 +313,68 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       toAdd.map((p) => ({ relative_image_path: p, sort_order: order++ })),
     );
     return { inserted: toAdd.length, skipped: body.relative_paths.length - toAdd.length };
+  });
+
+  /**
+   * multipart/form-data：字段 `relative_dir`（可选，相对 image_root 的子目录）；
+   * 文件字段名 `files`，可多选。仅允许常见图片后缀或 `.json`（JSON 须可解析）。
+   */
+  app.post('/api/test-suites/:suiteId/upload', async (req) => {
+    const suiteId = Number((req.params as { suiteId: string }).suiteId);
+    const suite = suitesRepo.getTestSuite(db, suiteId);
+    if (!suite) {
+      const err = new Error('测试集不存在');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    if (!req.isMultipart()) {
+      const err = new Error('请使用 multipart/form-data 上传');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const fieldValues: Record<string, string> = {};
+    const fileBuffers: { filename: string; buffer: Buffer }[] = [];
+
+    const parts = req.parts();
+    for await (const part of parts) {
+      if (part.type === 'field') {
+        fieldValues[part.fieldname] = String(part.value ?? '');
+      } else {
+        const filename = part.filename || 'file';
+        const buffer = await part.toBuffer();
+        fileBuffers.push({ filename, buffer });
+      }
+    }
+
+    if (!fileBuffers.length) {
+      const err = new Error('未收到文件：请至少选择一个文件');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    let sub: string;
+    try {
+      sub = normalizeUploadSubdir((fieldValues.relative_dir ?? '').trim());
+    } catch (e) {
+      const err = new Error((e as Error).message || '子目录不合法');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const uploaded: { relative_path: string; bytes: number }[] = [];
+    const errors: { filename: string; message: string }[] = [];
+
+    for (const f of fileBuffers) {
+      try {
+        uploaded.push(writeSuiteAsset(suite.image_root, sub, f.filename, f.buffer));
+      } catch (e) {
+        errors.push({ filename: f.filename, message: (e as Error).message || '写入失败' });
+      }
+    }
+
+    invalidateCaseMetadataManifestCache(suite.image_root);
+    return { uploaded, errors };
   });
 
   app.get('/api/test-suites/:suiteId/image', async (req, reply) => {
