@@ -2,12 +2,11 @@ import { JSONPath } from 'jsonpath-plus';
 import { config } from '../config.js';
 import type { AssertionConfig, AssertionRule } from '../model/types.js';
 import { evalCustomAssertionExpression } from './customScript.js';
+import { evaluateLlmJudgeRule, type LlmJudgeContext } from './llmJudge.js';
+import type { RuleResult } from './ruleResult.js';
 
-export interface RuleResult {
-  rule: AssertionRule;
-  ok: boolean;
-  detail: string;
-}
+export type { RuleResult } from './ruleResult.js';
+export type { LlmJudgeContext } from './llmJudge.js';
 
 function tryParseJson(text: string): unknown | undefined {
   const t = text.trim();
@@ -40,6 +39,25 @@ export function evaluateAssertionConfig(
     results.push(r);
   }
 
+  return { pass: results.every((x) => x.ok), results };
+}
+
+/** 批量运行使用：支持 `llmJudge` 规则（异步调用判定模型） */
+export async function evaluateAssertionConfigAsync(
+  outputText: string,
+  rules: AssertionRule[],
+  caseVars: Record<string, string>,
+  ctx: LlmJudgeContext,
+): Promise<{ pass: boolean; results: RuleResult[] }> {
+  const parsedJson = tryParseJson(outputText);
+  const results: RuleResult[] = [];
+  for (const rule of rules) {
+    if (rule.type === 'llmJudge') {
+      results.push(await evaluateLlmJudgeRule(rule, outputText, caseVars, ctx));
+    } else {
+      results.push(evaluateRule(outputText, parsedJson, caseVars, rule));
+    }
+  }
   return { pass: results.every((x) => x.ok), results };
 }
 
@@ -129,6 +147,13 @@ function evaluateRule(
       } catch (e) {
         return { rule, ok: false, detail: `自定义表达式执行失败：${(e as Error).message}` };
       }
+    }
+    case 'llmJudge': {
+      return {
+        rule,
+        ok: false,
+        detail: 'llmJudge 仅在批量运行中生效；请发起批量任务以执行 LLM 判定',
+      };
     }
     default: {
       const _never: never = rule;

@@ -1,0 +1,11 @@
+{
+  "rules": [
+    {
+      "type": "llmJudge",
+      "judge_prompt_profile_id": 2,
+      "judge_provider_profile_id": 1,
+      "judge_model_override": null,
+      "judge_params_override_json": null
+    }
+  ]
+}

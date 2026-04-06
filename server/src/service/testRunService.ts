@@ -1,7 +1,7 @@
 import EventEmitter from 'node:events';
 import type Database from 'better-sqlite3';
 import pLimit from 'p-limit';
-import { evaluateAssertionConfig, parseAssertionConfig } from '../assert/engine.js';
+import { evaluateAssertionConfigAsync, parseAssertionConfig } from '../assert/engine.js';
 import { chatVision } from '../provider/index.js';
 import * as promptsRepo from '../repository/promptsRepo.js';
 import * as providersRepo from '../repository/providersRepo.js';
@@ -179,7 +179,11 @@ async function processRunItem(
 
     const suite = suitesRepo.getTestSuite(db, testCase.suite_id)!;
     const assertionCfg = mergeAssertionConfig(suite.default_assertions_json, testCase.assertions_override_json);
-    const evalResult = evaluateAssertionConfig(visionResult.text, assertionCfg.rules, variables);
+    const evalResult = await evaluateAssertionConfigAsync(visionResult.text, assertionCfg.rules, variables, {
+      db,
+      runProvider: provider,
+      run,
+    });
 
     runsRepo.updateRunItem(db, item.id, {
       status: 'completed',

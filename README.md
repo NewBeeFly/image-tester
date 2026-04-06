@@ -11,7 +11,7 @@
 - **目录扫描导入**：对 `image_root` 下（可选子目录）递归扫描常见图片后缀，勾选后一键生成用例（自动跳过已存在路径）。
 - **上传到 image_root**：在「测试集与用例」页可将图片或 JSON（侧车、根目录 `image-tester-metadata.json` / `metadata.json` 等）通过浏览器上传到当前测试集的磁盘目录（`POST /api/test-suites/:suiteId/upload`，multipart，字段 `relative_dir` 可选、文件字段 `files` 可多选）；支持**整文件夹上传**（保留子目录结构，文件名使用浏览器提供的相对路径）。**新建与编辑测试集已合并为同一表单**：顶部下拉选择「新建」或已有测试集；在新建未保存时也可直接点上传，系统会先按表单**自动创建测试集**再写入文件。上传后仍需**扫描导入**或手动添加用例，规则与仅放磁盘文件一致。
 - **批量运行**：并发调用模型（默认 SQLite + 进程内队列），SSE 推送进度事件；结果落库。**只会跑数据库里已存在的用例**；本地图片 + `image-tester-metadata.json` 不会自动生成用例，须先在「测试集与用例」里**扫描导入**或**手动添加**。
-- **断言引擎**：`contains` / `regex` / `jsonPath`（含 equals、inList、regex、numericEquals）/ `customScript`（受限 `vm` 表达式，超时见环境变量）。
+- **断言引擎**：`contains` / `regex` / `jsonPath`（含 equals、inList、regex、numericEquals）/ `customScript`（受限 `vm` 表达式，超时见环境变量）/ **`llmJudge`（另选提示词模板，由大模型做语义判定，如门头名称在格式不一致时是否等价）**。
 - **报告**：按运行查看通过/失败/错误数量、断言正确率（排除请求错误）、失败用例左图右文展示模型输出与断言明细。
 
 ## 目录结构
@@ -151,12 +151,21 @@
     {
       "type": "customScript",
       "expression": "outputText.length > 10 && (!parsedJson || parsedJson.ok === true)"
+    },
+    {
+      "type": "llmJudge",
+      "judge_prompt_profile_id": 2,
+      "judge_provider_profile_id": 1,
+      "judge_model_override": null,
+      "judge_params_override_json": null
     }
   ]
 }
 ```
 
 **customScript**：填写一个 **JavaScript 表达式**（不是语句块），可使用 `outputText`（模型文本）、`parsedJson`（若能解析为 JSON）、`caseVars`（对象）。在 Node `vm` 沙箱中运行，仅适合本机工具场景；仍建议控制谁可访问该服务。
+
+**llmJudge**（仅**批量运行**执行；**单图预览**不会跑该规则）：在视觉模型输出后，再按你指定的**另一条提示词模板**调用**纯文本** Chat（无图片）。模板中可使用 `{{var:modelOutput}}` / `{{var:lastRecognition}}`（与本次视觉识别全文相同）以及 `{{var:键}}`（与主任务一致，来自**合并后的** variables 元数据，如 `storeName`）。可指定 `judge_prompt_profile_id` 必填；`judge_provider_profile_id` 可选（默认与当前运行同一 Provider）；`judge_model_override`、`judge_params_override_json` 可选。判定模型回复优先解析 JSON 的 `pass` 字段，否则解析首行 `PASS`/`FAIL` 等。示例提示词与断言片段见 [`examples/llm-judge-prompt-template.md`](examples/llm-judge-prompt-template.md)、[`examples/assertion-llm-judge-storefront.json`](examples/assertion-llm-judge-storefront.json)。
 
 **jsonPath**：使用 [JSONPath Plus](https://github.com/JSONPath-Plus/JSONPath-Plus) 语法。
 
@@ -231,3 +240,4 @@ Base URL 一般为控制台给出的 **OpenAI 兼容** 地址（如 `.../api/v3`
 - 增加运行级「停止」后，将进行中请求与队列行为定义得更清晰（当前取消主要影响尚未开始的用例）。
 - 导出 CSV / 两次运行 diff 回归。
 - 真正的进程级隔离沙箱（如 `isolated-vm`）替换 `customScript` 实现。
+- `llmJudge` 每条用例会多一次文本 Chat 调用，耗时与费用随规则增加；仅批量运行执行，单图预览不跑该规则。

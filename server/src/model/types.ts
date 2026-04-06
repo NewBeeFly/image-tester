@@ -89,7 +89,17 @@ export type AssertionRule =
       regex?: string;
       numericEquals?: number;
     }
-  | { type: 'customScript'; expression: string };
+  | { type: 'customScript'; expression: string }
+  | {
+      /** 调用另一套提示词（纯文本，勿使用 {{img:}}）让大模型判定是否通过，例如门头名称语义是否一致 */
+      type: 'llmJudge';
+      /** 判定专用的提示词模板 ID（与主任务视觉提示词分开） */
+      judge_prompt_profile_id: number;
+      /** 可选；默认与当前运行使用同一 Provider */
+      judge_provider_profile_id?: number;
+      judge_model_override?: string | null;
+      judge_params_override_json?: string | null;
+    };
 
 export interface AssertionConfig {
   rules: AssertionRule[];
