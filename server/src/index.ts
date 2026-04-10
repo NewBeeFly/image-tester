@@ -14,7 +14,7 @@ async function main() {
   await app.register(multipart, {
     limits: {
       fileSize: 50 * 1024 * 1024,
-      files: 80,
+      files: 500,
     },
   });
 

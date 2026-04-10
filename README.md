@@ -6,13 +6,13 @@
 
 - **Provider 档案**：Base URL、默认模型、默认请求参数 JSON、API Key 对应的**环境变量名**（页面不保存密钥明文）。新建时按所选厂商（OpenAI / 阿里云 DashScope / 火山方舟）自动带出常用默认值，可再改；**已有档案支持编辑**。
 - **提示词模板**：系统 / 用户模板支持文本与多图占位符（见下节）；每条用例的 `variables_json` 存元数据。**已有模板支持编辑**。
-- **测试集**：默认在**共用「测试集根目录」**（环境变量 `IMAGE_TESTER_SUITE_ROOT`，未设置时为项目内 `data/test-suites`）下为每个测试集创建**独立子目录**作为 `image_root`；也可用「高级」自行填写任意 `image_root`。用例含「主图相对路径」+ 元数据 JSON。**已有测试集与单条用例支持编辑**。可选在 `image_root` 下放 **`image-tester-metadata.json`** 或与主图同名的 **侧车 `.json`**，与库内元数据自动合并（见下文「本地元数据文件」）。
+- **测试集**：在**共用「测试集根目录」**下为每个测试集创建**独立子目录**作为 `image_root`（仅支持该模式，不再支持第三方自定义路径）。该根目录可通过**环境变量**或**项目根目录配置文件**设置（见下「测试集根目录」）；未配置时为项目内 `data/test-suites`。用例含「主图相对路径」+ 元数据 JSON。**已有测试集与单条用例支持编辑**。可选在 `image_root` 下放 **`image-tester-metadata.json`** 或与主图同名的 **侧车 `.json`**，与库内元数据自动合并（见下文「本地元数据文件」）。
 - **单图检测**：不跑批量任务，即时调用模型查看输出（`POST /api/vision/preview`），规则与批量一致。
 - **目录扫描导入**：对 `image_root` 下（可选子目录）递归扫描常见图片后缀，勾选后一键生成用例（自动跳过已存在路径）。
-- **上传到 image_root**：在「测试集与用例」页可将图片或 JSON（侧车、根目录 `image-tester-metadata.json` / `metadata.json` 等）通过浏览器上传到当前测试集的磁盘目录（`POST /api/test-suites/:suiteId/upload`，multipart，字段 `relative_dir` 可选、文件字段 `files` 可多选）；支持**整文件夹上传**（保留子目录结构，文件名使用浏览器提供的相对路径）。**新建与编辑测试集已合并为同一表单**：顶部下拉选择「新建」或已有测试集；在新建未保存时也可直接点上传，系统会先按表单**自动创建测试集**再写入文件。上传后仍需**扫描导入**或手动添加用例，规则与仅放磁盘文件一致。
+- **导入资源（三卡片）**：「测试集与用例」页提供三个操作卡片：**A·整文件夹导入**（上传本地文件夹，自动从 `metadata.json` / 侧车 `.json` 读变量写 DB，一键完成上传→扫描→导入）；**B·单独上传图片**（只上传图片，变量为空，之后可扫描导入或用 C 覆盖）；**C·JSON 覆盖变量**（上传 `metadata.json` 格式文件，仅更新 DB 中已有用例的变量）。卡片 A/B 的目标子目录支持从服务器已有目录**下拉选择**或手动输入。上传后目录选择器会自动刷新。
 - **批量运行**：并发调用模型（默认 SQLite + 进程内队列），SSE 推送进度事件；结果落库。**只会跑数据库里已存在的用例**；本地图片 + `image-tester-metadata.json` 不会自动生成用例，须先在「测试集与用例」里**扫描导入**或**手动添加**。
 - **断言引擎**：`contains` / `regex` / `jsonPath`（含 equals、inList、regex、numericEquals）/ `customScript`（受限 `vm` 表达式，超时见环境变量）/ **`llmJudge`（另选提示词模板，由大模型做语义判定，如门头名称在格式不一致时是否等价）**。
-- **报告**：按运行查看通过/失败/错误数量、断言正确率（排除请求错误）、失败用例左图右文展示模型输出与断言明细。
+- **报告**：按运行查看通过/失败/错误数量、断言正确率（排除请求错误）、**全量平均单条耗时**（基于库内该次运行已写入 `duration_ms` 的用例，与下方列表是否「仅看未通过」或分页无关）、失败用例左图右文展示模型输出与断言明细。
 
 ## 目录结构
 
@@ -20,6 +20,31 @@
 - [`web/`](web/)：React + Vite 前端，开发时代理 `/api` 到后端（**从项目根目录 `.env` 读取 `PORT`**，与 `server` 默认 8787 对齐，避免改端口后代理仍指向旧端口）。
 - [`.env.example`](.env.example)：环境变量示例（复制为项目根目录 `.env`）。
 - 根目录 [`package.json`](package.json)：在**根目录**执行 `npm run dev` 会用 `concurrently` 同时拉起后端与前端（在 `web` 里执行同名命令只会起前端）。
+- [`scripts/deploy-init.sh`](scripts/deploy-init.sh)：新机器一键安装依赖、构建、初始化 SQLite 表与数据目录（见下「新机器部署」）。
+
+## 新机器部署（含初始化数据库）
+
+在**项目根目录**执行：
+
+```bash
+npm run deploy:init
+```
+
+会做：`npm install`（`server` + `web`）、`npm run build`（两端）、`npm run init-db`（在 `server` 内：创建 SQLite 文件、执行与运行时相同的 `CREATE TABLE IF NOT EXISTS`、创建测试集父目录 `testSuiteParentDir`）。若尚无 `.env`，会从 [`.env.example`](.env.example) 复制一份。
+
+**局域网内其它设备访问 API**：在 `.env` 中设置 `HOST=0.0.0.0`，并按示例配置 `CORS_ORIGINS`（浏览器从非本机打开前端时必须包含前端完整来源，如 `http://192.168.x.x:5173`）。前端开发服务器默认只绑本机时，其它电脑打不开页面，需在 `web` 目录使用 `npx vite --host 0.0.0.0`（或等价配置），具体说明见脚本结束时的提示。
+
+**仅初始化数据库**（已构建过 `server`，不启动 HTTP）：
+
+```bash
+cd server && npm run init-db
+```
+
+未构建时可用开发依赖执行：
+
+```bash
+cd server && npm run init-db:dev
+```
 
 ## 快速开始
 
@@ -92,34 +117,55 @@
 
 门店招牌 + `storeName` 断言的可复制示例见 [`examples/`](examples/)（用例 `variables_json` 与测试集默认断言各一份）。
 
-### 本地元数据文件（与图片同 `image_root`，可不写进数据库）
+### 数据流：DB 优先，JSON 仅在导入/覆盖时使用
 
-除用例上的 **`variables_json`** 外，可在 **`image_root` 目录树内**用文件维护默认元数据，**跑批与单图预览**在组请求前会自动合并；**断言里的 `equalsCaseVar` 与 `caseVars`** 与最终发给模型的变量一致。
+> **重构后的核心原则**：`variables_json` 直接存入数据库，运行/预览时**只读数据库**；JSON 文件仅在**导入**或**手动覆盖**时写入数据库，之后磁盘 JSON 不再实时参与运行链路。
 
-1. **根清单（一个文件管多张图）**  
-   在测试集的 **`image_root` 根目录**（与测试集配置的路径**完全一致**的那一层，不要放在更深子目录）放清单文件，文件名二选一（**同时存在时优先前者**）：**`image-tester-metadata.json`** 或 **`metadata.json`**。内容为「对象」：**键**为相对 `image_root` 的主图路径（建议正斜杠 `/`，与用例里 `relative_image_path` **逐字一致**——若图片在子目录 `mdq` 下，键须为 `mdq/某图.jpg` 而不能只写文件名），**值**为与上文相同的 `{ "variables": {…}, "images": {…} }` 对象。示例见 [`examples/image-tester-metadata.json`](examples/image-tester-metadata.json)。
+**导入方式（三个操作卡片）**：
 
-   **常见读不到的原因**：① 文件不叫上述两个名字之一，或不在 `image_root` 根下；② JSON 顶层写成了单个 `{ "variables":… }` 而没有按「路径 → 元数据」分行（必须用路径当键）；③ 键与当前用例主图路径不一致。
+| 卡片 | 用途 |
+| --- | --- |
+| **A · 整文件夹导入** | 上传整个本地文件夹（图片 + JSON），后端自动从 `metadata.json` / 侧车 `.json` 解析变量并写入 DB；同时扫描并批量创建用例 |
+| **B · 单独上传图片** | 只上传图片，变量为空（`{}`）；之后可在扫描区导入，或用卡片 C 补充变量 |
+| **C · JSON 覆盖变量** | 上传 `metadata.json` 格式文件（`{"图片路径": {variables, images}}`），只更新 DB 中**已存在用例**的 `variables_json`，不新增用例 |
 
-2. **侧车 JSON（一图一旁，与主图同级同名）**  
-   主图为 `a/b/c.png` 时，可在同目录放 **`a/b/c.json`**（与主图**同主文件名**，扩展名改为 `.json`）。内容为单个用例的 `variables` / `images` 结构。可把 [`examples/sidecar-next-to-image.json`](examples/sidecar-next-to-image.json) 复制为某张图旁的 `*.json`。
+**JSON 文件格式（metadata.json / image-tester-metadata.json）**：
+```json
+{
+  "子目录/图片.jpg": {
+    "variables": { "scene": "门店", "hint": "看价签" },
+    "images": { "ref": "参考图.png" }
+  }
+}
+```
+- 键为相对 `image_root` 的图片路径（正斜杠，与用例 `relative_image_path` 逐字一致）
+- **侧车 JSON**：与主图同名的 `.json`（如 `a/b/c.png` 旁放 `a/b/c.json`），内容为单个用例的 `{ variables, images }` 结构；导入时优先级高于根清单
 
-**合并优先级**（后者覆盖前者）：数据库 / 页面里的 **`variables_json`（或预览 `metadata_json`）** 作基底 → 根清单（`image-tester-metadata.json` 或 `metadata.json`）中该路径的条目 → 与主图同名的侧车 `.json`（如 `a.jpg` 旁放 `a.json`，**不是**固定的 `metadata.json` 当侧车）。因此可**完全以磁盘为准**（用例里填 `{}` 即可）；若库内仍写了某键，磁盘 JSON 里**同名**的 `variables` / `images` 键会覆盖库内值。
+**合并优先级**（批量导入时，后者覆盖前者）：根清单（`image-tester-metadata.json` 或 `metadata.json`）→ 侧车 `.json`；合并结果整体写入数据库。
 
-**热更新**：侧车 `.json` 每次请求都会重新读取；清单在检测到文件的 **修改时间与大小** 变化后会自动重读缓存，**保存文件后无需重启后端**，下一轮批量运行、单图预览或页面「生效元数据预览」即可看到新内容。
-
-**接口**：`POST /api/test-suites/:suiteId/resolve-case-metadata`，请求体 `{ "relative_image_path": "…", "variables_json": "{}" }`，返回 `{ "metadata_json": "…" }`，与跑批/预览使用的合并规则一致。
+**接口**（供高级使用）：`POST /api/test-suites/:suiteId/resolve-case-metadata`，请求体 `{ "relative_image_path": "…", "variables_json": "{}" }`，返回 `{ "metadata_json": "…" }`，可用于查看导入前的磁盘合并预览。
 
 **图片不要当纯文本拼进 prompt**：模型收到的是「一条用户消息里多段 content」——文本段 + `type: image_url` 的图片段（后端读本地图转 `data:image/...;base64,...`）。把路径或 base64 写进字符串里，多数网关不会当图片识别；应使用 `{{img:别名}}` + 元数据 `images`，或留空 `{{img:}}` 走主图自动附图。
 
-**单图检测页**：左侧选 Provider、可直接编辑 **系统 / 用户提示词**；**请求参数 JSON** 会带入当前 Provider 档案里的默认参数（与 Provider 设置页一致），可改且**仅影响本次预览**；也可清空该框以完全使用档案默认值。`POST /api/vision/preview` 若带 **`params_effective_json`**（非空），则整段解析为扩展请求参数；否则仍按档案默认与可选的 `params_override_json` 合并。**选中已存提示词模板时会立即填入编辑框**（也可点「再次载入当前模板」）。右侧**必须先选测试集**，选图下拉合并 **已入库用例** 与 **`image_root` 下磁盘扫描**。主图路径须相对 `image_root`。
+**单图检测页**：左侧选 Provider、可直接编辑 **系统 / 用户提示词**；**请求参数 JSON** 会带入当前 Provider 档案里的默认参数（与 Provider 设置页一致），可改且**仅影响本次预览**；也可清空该框以完全使用档案默认值。`POST /api/vision/preview` 若带 **`params_effective_json`**（非空），则整段解析为扩展请求参数；否则仍按档案默认与可选的 `params_override_json` 合并。右侧**必须先选测试集**，选图下拉合并 **已入库用例** 与 **`image_root` 下磁盘扫描**。主图路径须相对 `image_root`。
+
+## 测试集根目录（共用托管目录）
+
+托管模式新建测试集时，子目录会创建在「共用测试集根目录」下。优先级从高到低：
+
+1. **`IMAGE_TESTER_SUITE_ROOT`**（环境变量）：相对**当前进程工作目录**，或绝对路径。
+2. **配置文件**：项目根目录 [`image-tester.config.json`](image-tester.config.example.json)（可复制示例重命名并修改），字段 **`suiteParentDir`**（或 `suite_parent_dir`）。其中相对路径相对于**项目根目录**（与内置默认 `data/test-suites` 一致）。
+3. **默认**：`<项目根>/data/test-suites`。
+
+可通过环境变量 **`IMAGE_TESTER_CONFIG`** 指定其它 JSON 路径（绝对路径，或相对当前工作目录），仍使用同一字段名。
 
 ## 环境变量说明
 
 | 变量 | 说明 |
 | --- | --- |
 | `OPENAI_API_KEY` / `DASHSCOPE_API_KEY` / `VOLCENGINE_ARK_API_KEY` | 与 Provider 档案中的 `api_key_env` 对应，由后端从环境读取。 |
-| `IMAGE_TESTER_SUITE_ROOT` | 可选。托管模式新建测试集时，所有子目录的父路径（相对进程工作目录或绝对路径）；未设置时默认为项目根下 `data/test-suites`。 |
+| `IMAGE_TESTER_SUITE_ROOT` | 可选。覆盖配置文件与默认值，见上「测试集根目录」。 |
+| `IMAGE_TESTER_CONFIG` | 可选。自定义 `image-tester.config.json` 的路径；未设置时读取项目根下该文件名。 |
 | `PORT` | 后端端口，默认 `8787`。 |
 | `HOST` | 监听地址，默认 `127.0.0.1`。需要局域网内其他机器访问时设为 `0.0.0.0`。 |
 | `SQLITE_PATH` | SQLite 文件路径，默认 `server/data/app.db`（相对 `server` 工作目录时可调整）。 |

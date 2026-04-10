@@ -15,6 +15,10 @@
   --ok: #059669;
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 8px 28px rgba(15, 23, 42, 0.09);
+  --input-bg: #ffffff;
+  --input-border: #c5cde0;
+  --input-border-hover: #a8b4d0;
+  --input-placeholder: #94a3b8;
   --radius: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
@@ -59,13 +63,12 @@ a:hover {
   text-decoration: underline;
 }
 
-code,
-textarea,
-input,
-select {
+code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.92em;
 }
+
+/* 表单用正文字体；代码/JSON 用页面里的 .mono */
 
 button {
   font: inherit;

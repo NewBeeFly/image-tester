@@ -3,7 +3,6 @@ import { chatVision } from '../provider/index.js';
 import * as providersRepo from '../repository/providersRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import { buildVisionRequestParts } from '../utils/multimodalPrompt.js';
-import { resolveMergedMetadataJson } from '../utils/caseMetadataMerge.js';
 import { resolveUnderRoot } from '../utils/pathSafe.js';
 
 export interface VisionPreviewBody {
@@ -41,11 +40,7 @@ export async function runVisionPreview(db: Database.Database, body: VisionPrevie
 
   resolveUnderRoot(suite.image_root, body.relative_image_path);
 
-  const metadataJson = resolveMergedMetadataJson(
-    suite.image_root,
-    body.relative_image_path,
-    body.metadata_json?.trim() || '{}',
-  );
+  const metadataJson = body.metadata_json?.trim() || '{}';
   const systemTemplate = body.system_prompt ?? '';
   const userTemplate = body.user_prompt_template;
 

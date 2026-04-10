@@ -29,14 +29,11 @@ import { cancelRun, startTestRun, subscribeRun } from '../service/testRunService
 import { mimeFromPath } from '../utils/mime.js';
 import {
   invalidateCaseMetadataManifestCache,
+  resolveMergedCaseMetadata,
   resolveMergedMetadataJson,
 } from '../utils/caseMetadataMerge.js';
 import { resolveUnderRoot } from '../utils/pathSafe.js';
 import { parseOrThrow } from '../utils/zodParse.js';
-
-function resolveImageRootInput(raw: string): string {
-  return path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(process.cwd(), raw);
-}
 
 /** 托管在 testSuiteParentDir 下的子目录名（禁止路径分隔符等） */
 function sanitizeManagedSubdir(raw: string): string {
@@ -142,20 +139,11 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       parseAssertionConfig(body.default_assertions_json);
     }
     let imageRoot: string;
-    if (body.managed_subdir?.trim()) {
-      try {
-        const sub = sanitizeManagedSubdir(body.managed_subdir);
-        imageRoot = ensureManagedImageRoot(sub);
-      } catch (e) {
-        const err = new Error((e as Error).message || '子目录不合法');
-        (err as Error & { statusCode?: number }).statusCode = 400;
-        throw err;
-      }
-    } else if (body.image_root?.trim()) {
-      imageRoot = resolveImageRootInput(body.image_root);
-      fs.mkdirSync(imageRoot, { recursive: true });
-    } else {
-      const err = new Error('请填写「子目录名」或「自定义 image_root」其一');
+    try {
+      const sub = sanitizeManagedSubdir(body.managed_subdir);
+      imageRoot = ensureManagedImageRoot(sub);
+    } catch (e) {
+      const err = new Error((e as Error).message || '子目录不合法');
       (err as Error & { statusCode?: number }).statusCode = 400;
       throw err;
     }
@@ -174,11 +162,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     if (body.default_assertions_json) {
       parseAssertionConfig(body.default_assertions_json);
     }
-    const patch = {
-      ...body,
-      ...(body.image_root ? { image_root: resolveImageRootInput(body.image_root) } : {}),
-    };
-    const updated = suitesRepo.updateTestSuite(db, id, patch);
+    const updated = suitesRepo.updateTestSuite(db, id, body);
     if (!updated) {
       const err = new Error('测试集不存在');
       (err as Error & { statusCode?: number }).statusCode = 404;
@@ -310,9 +294,118 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     suitesRepo.bulkInsertTestCases(
       db,
       suiteId,
-      toAdd.map((p) => ({ relative_image_path: p, sort_order: order++ })),
+      toAdd.map((p) => {
+        const meta = resolveMergedCaseMetadata(suite.image_root, p, '{}');
+        const hasData =
+          Object.keys(meta.variables ?? {}).length > 0 || Object.keys(meta.images ?? {}).length > 0;
+        return {
+          relative_image_path: p,
+          sort_order: order++,
+          variables_json: hasData ? JSON.stringify(meta) : '{}',
+        };
+      }),
     );
     return { inserted: toAdd.length, skipped: body.relative_paths.length - toAdd.length };
+  });
+
+  /**
+   * 用 metadata.json 格式的 JSON 覆盖已有用例的 variables_json。
+   * 请求体：multipart，文件字段 `file`，文件内容为 { "相对路径": { variables, images } } 格式。
+   * 仅更新数据库中已存在的用例，不新增用例。
+   */
+  app.post('/api/test-suites/:suiteId/cases/override-from-json', async (req) => {
+    const suiteId = Number((req.params as { suiteId: string }).suiteId);
+    const suite = suitesRepo.getTestSuite(db, suiteId);
+    if (!suite) {
+      const err = new Error('测试集不存在');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    if (!req.isMultipart()) {
+      const err = new Error('请使用 multipart/form-data 上传');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    let jsonText = '';
+    const parts = req.parts();
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        jsonText = (await part.toBuffer()).toString('utf8');
+        break;
+      }
+    }
+    if (!jsonText.trim()) {
+      const err = new Error('未收到 JSON 文件内容');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    } catch {
+      const err = new Error('JSON 内容无法解析');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const err = new Error('JSON 顶层必须是对象（格式：{ "图片路径": { variables, images } }）');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const cases = suitesRepo.listTestCases(db, suiteId);
+    const casesByPath = new Map(cases.map((c) => [c.relative_image_path, c]));
+
+    let updated = 0;
+    const not_found: string[] = [];
+
+    for (const [imgPath, metaVal] of Object.entries(parsed)) {
+      const c = casesByPath.get(imgPath);
+      if (!c) {
+        not_found.push(imgPath);
+        continue;
+      }
+      const variables_json = JSON.stringify(metaVal);
+      suitesRepo.updateTestCase(db, c.id, { variables_json });
+      updated++;
+    }
+
+    return { updated, not_found };
+  });
+
+  /** 列出 image_root 下的子目录（一层或递归，depth 参数控制） */
+  app.get('/api/test-suites/:suiteId/list-dirs', async (req) => {
+    const suiteId = Number((req.params as { suiteId: string }).suiteId);
+    const q = req.query as { depth?: string };
+    const suite = suitesRepo.getTestSuite(db, suiteId);
+    if (!suite) {
+      const err = new Error('测试集不存在');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    const maxDepth = Math.min(Number(q.depth ?? 2), 6);
+    const dirs: string[] = [];
+
+    async function walkDirs(dirAbs: string, relBase: string, depth: number) {
+      if (depth > maxDepth) return;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const ent of entries) {
+        if (!ent.isDirectory() || ent.name.startsWith('.')) continue;
+        const rel = relBase ? `${relBase}/${ent.name}` : ent.name;
+        dirs.push(rel);
+        await walkDirs(path.join(dirAbs, ent.name), rel, depth + 1);
+      }
+    }
+
+    await walkDirs(suite.image_root, '', 1);
+    return { dirs };
   });
 
   /**
@@ -434,7 +527,8 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       (err as Error & { statusCode?: number }).statusCode = 404;
       throw err;
     }
-    return run;
+    const duration_stats = runsRepo.getRunDurationStats(db, id);
+    return { ...run, duration_stats };
   });
 
   app.post('/api/test-runs/:id/cancel', async (req) => {

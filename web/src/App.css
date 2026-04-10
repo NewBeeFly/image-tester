@@ -84,6 +84,101 @@
 }
 
 /** 测试集页：分区标题与底部保存区 */
+/* ── 测试集顶部选择器区域 ── */
+.suiteHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.suiteHeaderSelect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.suiteHeaderLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  margin: 0;
+}
+
+.suiteHeaderDropdown {
+  flex: 1;
+}
+
+.suiteBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.suiteBadge--new {
+  background: var(--panel-subtle);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.suiteBadge--editing {
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+/* ── 根目录信息栏 ── */
+.suiteRootBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 18px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.suiteRootLabel {
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.suiteRootPath {
+  flex: 1;
+  color: var(--text);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.suiteRootHint {
+  color: var(--accent);
+  font-size: 12px;
+  cursor: help;
+  flex-shrink: 0;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+
+.suiteRootHint:hover {
+  opacity: 1;
+}
+
 .suiteSectionTitle {
   margin: 20px 0 12px;
   font-size: 14px;
@@ -96,6 +191,21 @@
   margin-top: 22px;
   padding-top: 18px;
   border-top: 1px solid var(--border);
+}
+
+.uploadCard {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-subtle);
+}
+
+.uploadCardTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
 }
 
 .suiteSaveHint {
@@ -125,32 +235,94 @@ label {
   margin-bottom: 4px;
 }
 
-input[type='text'],
+/* 文本类控件：白底 + 轻阴影，排除 checkbox / file 等 */
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset']),
 select,
 textarea {
   width: 100%;
-  padding: 9px 12px;
+  max-width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.45;
   border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--panel-subtle);
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
   color: var(--text);
+  box-shadow: var(--shadow-sm);
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
 }
 
-input[type='text']:focus,
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset'])::placeholder,
+textarea::placeholder {
+  color: var(--input-placeholder);
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset']):hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--input-border-hover);
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset']):focus,
 select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
-  background: var(--panel);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 3px rgba(99, 102, 241, 0.18);
+  background: var(--input-bg);
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset'])[readonly],
+textarea[readonly] {
+  background: var(--panel-subtle);
+  border-color: var(--border);
+  cursor: default;
+  box-shadow: none;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not([type='range']):not(
+    [type='button']
+  ):not([type='submit']):not([type='reset']):disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M3 4.5L6 8l3-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
 }
 
 textarea {
   min-height: 88px;
   resize: vertical;
+  font-family: inherit;
+}
+
+textarea.mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .actions {
@@ -340,6 +512,12 @@ th {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+input.mono,
+select.mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
 }
 
 .previewLayout {
@@ -700,9 +878,9 @@ th {
 .previewWorkbenchRoot input,
 .previewWorkbenchRoot select,
 .previewWorkbenchRoot textarea {
-  background: #fff;
+  background: var(--input-bg);
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--input-border);
 }
 
 .previewWorkbenchRoot textarea {
@@ -915,8 +1093,48 @@ th {
   align-self: start;
 }
 
-.reportItemThumb {
+.reportThumbBtn {
   margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.reportItemThumb {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.reportThumbBtn:hover .reportItemThumb {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+}
+
+.reportImageOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.reportImageLarge {
+  max-width: min(92vw, 1400px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  background: #000;
+}
+
+.reportImageClose {
+  position: absolute;
+  top: 16px;
+  right: 16px;
 }
 
 .reportItemDetailCol {

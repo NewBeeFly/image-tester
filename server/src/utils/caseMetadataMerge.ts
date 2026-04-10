@@ -71,27 +71,37 @@ type ManifestCacheEntry = {
   map: Map<string, CaseMetadata>;
 };
 
-/** 按 image_root 分桶；mtime+size 任一变化即重读清单，便于编辑磁盘 JSON 后热更新 */
-const manifestCacheByRoot = new Map<string, ManifestCacheEntry>();
+/**
+ * 按目录绝对路径分桶的清单缓存：
+ * - key 为 imageRoot 绝对路径 → 根清单（key 为完整相对路径）
+ * - key 为 "absDir" → 子目录清单（key 为裸文件名）
+ */
+const manifestCacheByDir = new Map<string, ManifestCacheEntry>();
 
 /** 测试集 image_root 变更时可调用；不传参则清空全部缓存 */
 export function invalidateCaseMetadataManifestCache(imageRoot?: string): void {
   if (!imageRoot) {
-    manifestCacheByRoot.clear();
+    manifestCacheByDir.clear();
     return;
   }
-  manifestCacheByRoot.delete(path.resolve(imageRoot));
+  const absRoot = path.resolve(imageRoot);
+  // 清除所有以 absRoot 开头的目录缓存
+  for (const k of manifestCacheByDir.keys()) {
+    if (k === absRoot || k.startsWith(absRoot + path.sep)) {
+      manifestCacheByDir.delete(k);
+    }
+  }
 }
 
-function resolveManifestFile(absRoot: string): { abs: string; st: fs.Stats } | null {
-  const primary = path.join(absRoot, IMAGE_TESTER_MANIFEST);
+function resolveManifestInDir(absDir: string): { abs: string; st: fs.Stats } | null {
+  const primary = path.join(absDir, IMAGE_TESTER_MANIFEST);
   try {
     const st = fs.statSync(primary);
     if (st.isFile()) return { abs: primary, st };
   } catch {
     /* 无主清单 */
   }
-  const legacy = path.join(absRoot, LEGACY_METADATA_MANIFEST);
+  const legacy = path.join(absDir, LEGACY_METADATA_MANIFEST);
   try {
     const st = fs.statSync(legacy);
     if (st.isFile()) return { abs: legacy, st };
@@ -101,15 +111,14 @@ function resolveManifestFile(absRoot: string): { abs: string; st: fs.Stats } | n
   return null;
 }
 
-function manifestMapForRoot(imageRoot: string): Map<string, CaseMetadata> {
-  const absRoot = path.resolve(imageRoot);
-  const resolved = resolveManifestFile(absRoot);
+function manifestMapForDir(absDir: string): Map<string, CaseMetadata> {
+  const resolved = resolveManifestInDir(absDir);
   if (!resolved) {
-    manifestCacheByRoot.delete(absRoot);
+    manifestCacheByDir.delete(absDir);
     return new Map();
   }
   const { abs, st } = resolved;
-  const cached = manifestCacheByRoot.get(absRoot);
+  const cached = manifestCacheByDir.get(absDir);
   if (
     cached &&
     cached.sourceAbs === abs &&
@@ -119,17 +128,17 @@ function manifestMapForRoot(imageRoot: string): Map<string, CaseMetadata> {
     return cached.map;
   }
   const map = parseManifestFile(abs);
-  manifestCacheByRoot.set(absRoot, { mtimeMs: st.mtimeMs, size: st.size, sourceAbs: abs, map });
+  manifestCacheByDir.set(absDir, { mtimeMs: st.mtimeMs, size: st.size, sourceAbs: abs, map });
   return map;
 }
 
 /**
- * 合并元数据（用于请求与断言里的 caseVars）——**磁盘 JSON 优先**：
- * 1. 数据库 / 单图页 `variables_json`（或预览 `metadata_json`）作**基底**（可填 `{}`，变量全由文件提供）
- * 2. `image_root/image-tester-metadata.json`（若不存在则尝试同目录下的 `metadata.json`）中该主图**相对路径**键对应的条目**覆盖**同名键
- * 3. 与主图同名的侧车 `.json`**再覆盖**（侧车 > 清单 > 库/表单）
- *
- * 侧车每次请求现读；清单在 `mtime` 或 `size` 变化时自动重读，编辑保存后下一轮请求即生效。
+ * 合并元数据（用于导入写库与断言里的 caseVars）：
+ * 1. 数据库里的 `variables_json` 作**基底**
+ * 2. `image_root/` 根清单（key 为完整相对路径，如 `subdir/image.jpg`）**覆盖**同名键
+ * 3. 图片所在子目录的清单（key 为裸文件名，如 `image.jpg`）**再覆盖**
+ *    ——这样整文件夹上传后，子目录里的 metadata.json 也能被解析到
+ * 4. 与主图同名的侧车 `.json`**最高优先**（sidecar > 子目录清单 > 根清单 > 库值）
  */
 export function resolveMergedCaseMetadata(
   imageRoot: string,
@@ -137,14 +146,30 @@ export function resolveMergedCaseMetadata(
   dbOrUiVariablesJson: string,
 ): CaseMetadata {
   const rel = posix(relativeImagePath).replace(/^\/+/, '');
+  const absRoot = path.resolve(imageRoot);
 
   let merged = parseCaseMetadataJson(dbOrUiVariablesJson);
 
-  const fromManifest = manifestMapForRoot(imageRoot).get(rel);
-  if (fromManifest) {
-    merged = mergeMeta(merged, fromManifest);
+  // 1. 根清单：用完整相对路径匹配
+  const rootManifest = manifestMapForDir(absRoot);
+  const fromRoot = rootManifest.get(rel);
+  if (fromRoot) {
+    merged = mergeMeta(merged, fromRoot);
   }
 
+  // 2. 子目录清单：用裸文件名匹配（便于整文件夹上传后自动读取）
+  const relDir = path.posix.dirname(rel);
+  if (relDir !== '.') {
+    const absSubDir = path.join(absRoot, relDir);
+    const subManifest = manifestMapForDir(absSubDir);
+    const basename = path.posix.basename(rel);
+    const fromSub = subManifest.get(basename);
+    if (fromSub) {
+      merged = mergeMeta(merged, fromSub);
+    }
+  }
+
+  // 3. 侧车 JSON（最高优先级）
   const sideRel = sidecarRelativePathForImage(rel);
   try {
     const sideAbs = resolveUnderRoot(imageRoot, sideRel);

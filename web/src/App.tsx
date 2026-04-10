@@ -54,6 +54,17 @@ function metadataJsonForPath(relativePath: string): string {
   )
 }
 
+function isEmptyResolvedMetadata(raw: string): boolean {
+  try {
+    const j = JSON.parse(raw) as { variables?: unknown; images?: unknown }
+    const vars = j?.variables && typeof j.variables === 'object' ? Object.keys(j.variables as object) : []
+    const imgs = j?.images && typeof j.images === 'object' ? Object.keys(j.images as object) : []
+    return vars.length === 0 && imgs.length === 0
+  } catch {
+    return true
+  }
+}
+
 /** 主图输入框：若用户粘贴了本机绝对路径，提前提示（后端按「相对 image_root」解析） */
 function looksLikeAbsolutePath(p: string): boolean {
   const t = p.trim()
@@ -70,13 +81,6 @@ function prettyJsonFromProviderDefaults(raw: string): string {
     return raw.trim() || '{}'
   }
 }
-
-/** 第二种方式：不写 {{img:}}，主图自动附在整段文字后面 */
-const PREVIEW_APPEND_MODE_USER = `任务说明：{{var:hint}}
-
-下面这段文字里没有写 {{img:xxx}}。平台会自动把你选的「主图路径」当成一张图，附在这条消息的最后面——同样是单独的图片块。
-
-请描述图片场景。`
 
 const defaultAssertionExample = `{
   "rules": [
@@ -556,8 +560,6 @@ function emptySuiteForm() {
     name: '示例测试集',
     /** 托管在「测试集根目录」下的子文件夹名 */
     managed_subdir: 'example-suite',
-    use_custom_image_root: false,
-    image_root: '',
     default_assertions_json: defaultAssertionExample,
   }
 }
@@ -584,15 +586,19 @@ function SuitesSection(props: {
   const [scanDir, setScanDir] = useState('')
   const [scanPaths, setScanPaths] = useState<string[]>([])
   const [selectedScan, setSelectedScan] = useState<Record<string, boolean>>({})
-  const [resolvedEffectiveJson, setResolvedEffectiveJson] = useState('')
-  const [uploadSubdir, setUploadSubdir] = useState('')
-  const [uploadTip, setUploadTip] = useState('')
   const [suiteParentDir, setSuiteParentDir] = useState('')
+
+  // 上传相关：三卡片各自的状态
+  const [uploadDirOptions, setUploadDirOptions] = useState<string[]>([])
+  const [folderTargetDir, setFolderTargetDir] = useState('')
+  const [folderTip, setFolderTip] = useState('')
+  const [imgTargetDir, setImgTargetDir] = useState('')
+  const [imgTip, setImgTip] = useState('')
+  const [jsonOverrideTip, setJsonOverrideTip] = useState('')
+
   const imgUploadRef = useRef<HTMLInputElement>(null)
-  const jsonUploadRef = useRef<HTMLInputElement>(null)
   const folderUploadRef = useRef<HTMLInputElement>(null)
-  const caseFormRef = useRef(caseForm)
-  caseFormRef.current = caseForm
+  const jsonOverrideRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void getJson<AppConfig>('/api/config')
@@ -607,6 +613,16 @@ function SuitesSection(props: {
     [props.suites, dataSuiteId],
   )
 
+  /** 加载服务器 image_root 下子目录列表 */
+  const refreshDirOptions = useCallback(async (sid: number) => {
+    try {
+      const r = await getJson<{ dirs: string[] }>(`/api/test-suites/${sid}/list-dirs`)
+      setUploadDirOptions(r.dirs)
+    } catch {
+      setUploadDirOptions([])
+    }
+  }, [])
+
   async function refreshCases(id: number) {
     const list = await getJson<TestCase[]>(`/api/test-suites/${id}/cases`)
     setCases(list)
@@ -614,15 +630,17 @@ function SuitesSection(props: {
 
   useEffect(() => {
     if (dataSuiteId != null) {
-      void refreshCases(dataSuiteId).catch(() => {
-        /* ignore */
-      })
+      void refreshCases(dataSuiteId).catch(() => { /* ignore */ })
+      void refreshDirOptions(dataSuiteId)
     } else {
       setCases([])
+      setUploadDirOptions([])
     }
     setCaseEditingId(null)
     setCaseForm(emptyCaseForm())
-    setUploadTip('')
+    setFolderTip('')
+    setImgTip('')
+    setJsonOverrideTip('')
   }, [dataSuiteId])
 
   function beginNewSuite() {
@@ -638,8 +656,6 @@ function SuitesSection(props: {
     setSuiteForm({
       name: s.name,
       managed_subdir: '',
-      use_custom_image_root: true,
-      image_root: s.image_root,
       default_assertions_json: s.default_assertions_json,
     })
     props.onError(null)
@@ -653,17 +669,6 @@ function SuitesSection(props: {
     const default_assertions_json = suiteForm.default_assertions_json || '{"rules":[]}'
     if (!suiteForm.name.trim()) {
       throw new Error('请填写测试集名称')
-    }
-    if (suiteForm.use_custom_image_root) {
-      const image_root = suiteForm.image_root.trim()
-      if (!image_root) {
-        throw new Error('请填写自定义「图片根目录 image_root」')
-      }
-      return postJson<TestSuite>('/api/test-suites', {
-        name: suiteForm.name,
-        image_root,
-        default_assertions_json,
-      })
     }
     const managed_subdir = suiteForm.managed_subdir.trim()
     if (!managed_subdir) {
@@ -685,8 +690,6 @@ function SuitesSection(props: {
     setSuiteForm({
       name: row.name,
       managed_subdir: '',
-      use_custom_image_root: true,
-      image_root: row.image_root,
       default_assertions_json: row.default_assertions_json,
     })
     props.onChange()
@@ -700,7 +703,6 @@ function SuitesSection(props: {
         const default_assertions_json = suiteForm.default_assertions_json || '{"rules":[]}'
         await patchJson(`/api/test-suites/${suiteEditingId}`, {
           name: suiteForm.name,
-          image_root: suiteForm.image_root,
           default_assertions_json,
         })
         props.onChange()
@@ -712,8 +714,6 @@ function SuitesSection(props: {
       setSuiteForm({
         name: row.name,
         managed_subdir: '',
-        use_custom_image_root: true,
-        image_root: row.image_root,
         default_assertions_json: row.default_assertions_json,
       })
       props.onChange()
@@ -725,45 +725,18 @@ function SuitesSection(props: {
   function cancelCaseEdit() {
     setCaseEditingId(null)
     setCaseForm(emptyCaseForm())
-    setResolvedEffectiveJson('')
   }
-
-  const refreshResolvedCaseMetadata = useCallback(async () => {
-    if (dataSuiteId == null) return
-    const f = caseFormRef.current
-    const rel = f.relative_image_path.trim()
-    if (!rel) {
-      setResolvedEffectiveJson('')
-      return
-    }
-    try {
-      const r = await postJson<{ metadata_json: string }>(
-        `/api/test-suites/${dataSuiteId}/resolve-case-metadata`,
-        {
-          relative_image_path: rel,
-          variables_json: f.variables_json?.trim() ? f.variables_json : '{}',
-        },
-      )
-      const pretty = JSON.stringify(JSON.parse(r.metadata_json) as object, null, 2)
-      setResolvedEffectiveJson(pretty)
-    } catch {
-      setResolvedEffectiveJson('（解析失败，请检查路径与 JSON）')
-    }
-  }, [dataSuiteId])
-
-  /** 编辑用例时定时拉取合并结果，便于侧车 / 清单保存后热更新 */
-  useEffect(() => {
-    if (dataSuiteId == null || caseEditingId == null) return
-    void refreshResolvedCaseMetadata()
-    const id = window.setInterval(() => void refreshResolvedCaseMetadata(), 3000)
-    return () => window.clearInterval(id)
-  }, [dataSuiteId, caseEditingId, refreshResolvedCaseMetadata])
 
   function startEditCase(c: TestCase) {
     setCaseEditingId(c.id)
+    const rawVars = c.variables_json || '{}'
+    let pretty = rawVars
+    try {
+      pretty = JSON.stringify(JSON.parse(rawVars) as object, null, 2)
+    } catch { /* keep raw */ }
     setCaseForm({
       relative_image_path: c.relative_image_path,
-      variables_json: c.variables_json || '{}',
+      variables_json: pretty,
       assertions_override_json: c.assertions_override_json ?? '',
     })
   }
@@ -832,59 +805,8 @@ function SuitesSection(props: {
     }
   }
 
-  async function uploadSuiteFiles(kind: 'images' | 'json') {
-    let targetId: number
-    try {
-      targetId = await resolveSuiteIdForOperation()
-    } catch (e) {
-      props.onError((e as Error).message)
-      return
-    }
-    const input = kind === 'images' ? imgUploadRef.current : jsonUploadRef.current
-    const raw = input?.files
-    if (!raw?.length) {
-      props.onError(kind === 'images' ? '请先选择要上传的图片' : '请先选择要上传的 JSON 文件')
-      return
-    }
-    let list = Array.from(raw)
-    if (kind === 'json') {
-      list = list.filter((f) => f.name.toLowerCase().endsWith('.json'))
-      if (!list.length) {
-        props.onError('请选择扩展名为 .json 的文件')
-        return
-      }
-    } else {
-      const okExt = /\.(png|jpe?g|webp|gif|bmp)$/i
-      list = list.filter((f) => okExt.test(f.name))
-      if (!list.length) {
-        props.onError('请选择常见图片（png / jpg / jpeg / webp / gif / bmp）')
-        return
-      }
-    }
-    props.onError(null)
-    setUploadTip('')
-    try {
-      const fd = new FormData()
-      fd.append('relative_dir', uploadSubdir.trim())
-      for (const f of list) {
-        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
-        fd.append('files', f, rel)
-      }
-      const r = await postFormData<{
-        uploaded: Array<{ relative_path: string; bytes: number }>
-        errors: Array<{ filename: string; message: string }>
-      }>(`/api/test-suites/${targetId}/upload`, fd)
-      const ok = r.uploaded.map((u) => `${u.relative_path}（${u.bytes} B）`).join('；')
-      const bad = (r.errors ?? []).map((e) => `${e.filename}：${e.message}`).join('；')
-      setUploadTip([ok ? `成功：${ok}` : '', bad ? `失败：${bad}` : ''].filter(Boolean).join('\n'))
-      if (input) input.value = ''
-      void scan()
-    } catch (e) {
-      props.onError((e as Error).message)
-    }
-  }
-
-  async function uploadFolder() {
+  /** 卡片A：上传整个文件夹（图片+JSON），上传后自动扫描 + 导入（变量从磁盘JSON写入DB） */
+  async function uploadFolderAndImport() {
     let targetId: number
     try {
       targetId = await resolveSuiteIdForOperation()
@@ -895,26 +817,26 @@ function SuitesSection(props: {
     const input = folderUploadRef.current
     const raw = input?.files
     if (!raw?.length) {
-      props.onError('请先点击「选择文件夹」，在系统对话框里选中整个文件夹')
+      props.onError('请先选择文件夹')
       return
     }
     props.onError(null)
-    setUploadTip('')
+    setFolderTip('上传中…')
     const fd = new FormData()
-    fd.append('relative_dir', uploadSubdir.trim())
+    fd.append('relative_dir', folderTargetDir.trim())
     let n = 0
     for (const f of Array.from(raw)) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? f.name
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
       if (rel.includes('..')) continue
       const segments = rel.split(/[/\\]/).filter(Boolean)
       if (segments.some((s) => s.startsWith('.'))) continue
-      const lower = f.name.toLowerCase()
-      if (!/\.(png|jpe?g|webp|gif|bmp|json)$/i.test(lower)) continue
+      if (!/\.(png|jpe?g|webp|gif|bmp|json)$/i.test(f.name.toLowerCase())) continue
       fd.append('files', f, rel)
       n++
     }
     if (n === 0) {
-      props.onError('文件夹内没有可上传的图片或 .json（已跳过以 . 开头的隐藏文件）')
+      props.onError('文件夹内没有可上传的图片或 .json')
+      setFolderTip('')
       return
     }
     try {
@@ -922,13 +844,125 @@ function SuitesSection(props: {
         uploaded: Array<{ relative_path: string; bytes: number }>
         errors: Array<{ filename: string; message: string }>
       }>(`/api/test-suites/${targetId}/upload`, fd)
-      const ok = r.uploaded.map((u) => `${u.relative_path}（${u.bytes} B）`).join('；')
-      const bad = (r.errors ?? []).map((e) => `${e.filename}：${e.message}`).join('；')
-      setUploadTip([ok ? `成功：${ok}` : '', bad ? `失败：${bad}` : ''].filter(Boolean).join('\n'))
+      const ok = r.uploaded.length
+      const bad = (r.errors ?? []).length
+      setFolderTip(`上传完成：${ok} 个成功${bad ? `，${bad} 个失败` : ''}。正在扫描并导入…`)
       if (input) input.value = ''
-      void scan()
+      // 扫描图片并全部导入，导入时后端会从磁盘JSON读变量写DB
+      const scanRes = await getJson<{ paths: string[] }>(`/api/test-suites/${targetId}/scan-images`)
+      if (scanRes.paths.length) {
+        const importRes = await postJson<{ inserted: number; skipped: number }>(
+          `/api/test-suites/${targetId}/cases/bulk-import`,
+          { relative_paths: scanRes.paths },
+        )
+        setFolderTip(`完成：上传 ${ok} 个文件，导入 ${importRes.inserted} 条用例（跳过已存在 ${importRes.skipped} 条）`)
+      } else {
+        setFolderTip(`上传 ${ok} 个文件，未扫描到图片，请检查文件夹内容`)
+      }
+      await refreshCases(targetId)
+      await refreshDirOptions(targetId)
+      props.onChange()
     } catch (e) {
       props.onError((e as Error).message)
+      setFolderTip('')
+    }
+  }
+
+  /** 卡片B：单独上传图片并自动写入数据库（variables 为空，方便后续用卡片C覆盖变量） */
+  async function uploadImages() {
+    let targetId: number
+    try {
+      targetId = await resolveSuiteIdForOperation()
+    } catch (e) {
+      props.onError((e as Error).message)
+      return
+    }
+    const input = imgUploadRef.current
+    const raw = input?.files
+    if (!raw?.length) {
+      props.onError('请先选择要上传的图片')
+      return
+    }
+    const list = Array.from(raw).filter((f) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name))
+    if (!list.length) {
+      props.onError('请选择常见图片（png / jpg / jpeg / webp / gif / bmp）')
+      return
+    }
+    props.onError(null)
+    setImgTip('上传中…')
+    try {
+      const fd = new FormData()
+      fd.append('relative_dir', imgTargetDir.trim())
+      for (const f of list) {
+        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+        fd.append('files', f, rel)
+      }
+      const r = await postFormData<{
+        uploaded: Array<{ relative_path: string; bytes: number }>
+        errors: Array<{ filename: string; message: string }>
+      }>(`/api/test-suites/${targetId}/upload`, fd)
+      const ok = r.uploaded.length
+      const bad = (r.errors ?? []).length
+      setImgTip(`上传完成：${ok} 张成功${bad ? `，${bad} 张失败` : ''}。正在导入到数据库…`)
+      if (input) input.value = ''
+      await refreshDirOptions(targetId)
+      // 仅扫描刚上传的目录，避免全量扫描太慢
+      const q = new URLSearchParams()
+      if (imgTargetDir.trim()) q.set('relative_dir', imgTargetDir.trim())
+      const scanRes = await getJson<{ paths: string[] }>(`/api/test-suites/${targetId}/scan-images?${q.toString()}`)
+      if (scanRes.paths.length) {
+        const importRes = await postJson<{ inserted: number; skipped: number }>(
+          `/api/test-suites/${targetId}/cases/bulk-import`,
+          { relative_paths: scanRes.paths },
+        )
+        setImgTip(`完成：上传 ${ok} 张，导入 ${importRes.inserted} 条用例（跳过已存在 ${importRes.skipped} 条）`)
+      } else {
+        setImgTip(`上传 ${ok} 张，扫描未发现图片，请检查目录`)
+      }
+      await refreshCases(targetId)
+      props.onChange()
+    } catch (e) {
+      props.onError((e as Error).message)
+      setImgTip('')
+    }
+  }
+
+  /** 卡片C：用 JSON 文件覆盖已有用例的变量 */
+  async function overrideFromJson() {
+    if (dataSuiteId == null) {
+      props.onError('请先选择测试集')
+      return
+    }
+    const input = jsonOverrideRef.current
+    const raw = input?.files
+    if (!raw?.length) {
+      props.onError('请先选择 JSON 文件')
+      return
+    }
+    props.onError(null)
+    setJsonOverrideTip('覆盖中…')
+    try {
+      const fd = new FormData()
+      fd.append('file', raw[0])
+      const r = await postFormData<{ updated: number; not_found: string[] }>(
+        `/api/test-suites/${dataSuiteId}/cases/override-from-json`,
+        fd,
+      )
+      let tip = `覆盖完成：更新 ${r.updated} 条用例`
+      if (r.not_found.length) {
+        const sample = r.not_found.slice(0, 3).join('、')
+        const more = r.not_found.length > 3 ? `…等 ${r.not_found.length} 条` : ''
+        tip += `\n⚠️ ${r.not_found.length} 条路径在数据库中不存在（${sample}${more}）`
+        if (r.updated === 0) {
+          tip += '\n\n💡 提示：卡片 C 只能更新已入库的用例。请先用下方「扫描图片 → 导入选中」把图片导入到数据库，再来覆盖变量。或直接使用卡片 A（整文件夹导入），一步完成上传+导入+写入变量。'
+        }
+      }
+      setJsonOverrideTip(tip)
+      if (input) input.value = ''
+      await refreshCases(dataSuiteId)
+    } catch (e) {
+      props.onError((e as Error).message)
+      setJsonOverrideTip('')
     }
   }
 
@@ -939,44 +973,43 @@ function SuitesSection(props: {
         顶部选择「新建」或已有测试集；中间按顺序填写目录、（可选）上传文件；<strong>最下方「保存测试集」</strong>把名称、图片根目录与默认断言写入数据库。断言为 JSON：{' '}
         <span className="mono">{'{ "rules": [ ... ] }'}</span>。
       </p>
-      <div className="row row2">
-        <div>
-          <label>当前测试集</label>
+      {/* 顶部：测试集选择器 + 状态 badge */}
+      <div className="suiteHeader">
+        <div className="suiteHeaderSelect">
+          <label className="suiteHeaderLabel">当前测试集</label>
           <select
+            className="suiteHeaderDropdown"
             value={suiteId ?? ''}
             onChange={(e) => {
               const v = e.target.value
-              if (!v) {
-                beginNewSuite()
-                return
-              }
+              if (!v) { beginNewSuite(); return }
               const s = props.suites.find((x) => x.id === Number(v))
               if (s) loadSuiteIntoForm(s)
             }}
           >
             <option value="">— 新建测试集 —</option>
             {props.suites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id} · {s.name}
-              </option>
+              <option key={s.id} value={s.id}>{s.id} · {s.name}</option>
             ))}
           </select>
         </div>
-        <div>
-          <label>状态</label>
-          <input
-            readOnly
-            value={
-              suiteEditingId != null
-                ? `编辑 #${suiteEditingId}${activeSuite ? ` · ${activeSuite.name}` : ''}`
-                : '新建（未入库）'
-            }
-          />
-        </div>
+        <span className={suiteEditingId != null ? 'suiteBadge suiteBadge--editing' : 'suiteBadge suiteBadge--new'}>
+          {suiteEditingId != null
+            ? `编辑中 #${suiteEditingId}${activeSuite ? ` · ${activeSuite.name}` : ''}`
+            : '新建（未入库）'}
+        </span>
       </div>
-      <div className="row">
-        <label>共用测试集根目录（只读）</label>
-        <input readOnly className="mono" value={suiteParentDir || '（加载中…）'} title="可由环境变量 IMAGE_TESTER_SUITE_ROOT 配置" />
+
+      {/* 共用根目录信息栏 */}
+      <div className="suiteRootBar">
+        <span className="suiteRootLabel">根目录</span>
+        <span className="suiteRootPath mono">{suiteParentDir || '加载中…'}</span>
+        <span
+          className="suiteRootHint"
+          title="可复制 image-tester.config.example.json 为 image-tester.config.json，修改 suiteParentDir 字段；或设置环境变量 IMAGE_TESTER_SUITE_ROOT"
+        >
+          ⓘ 如何修改？
+        </span>
       </div>
 
       <h3 className="suiteSectionTitle">名称与目录</h3>
@@ -987,56 +1020,17 @@ function SuitesSection(props: {
       {suiteEditingId != null ? (
         <div className="row">
           <label>图片根目录 image_root</label>
-          <input
-            className="mono"
-            value={suiteForm.image_root}
-            onChange={(e) => setSuiteForm({ ...suiteForm, image_root: e.target.value })}
-          />
+          <input className="mono" value={activeSuite?.image_root ?? ''} readOnly />
         </div>
       ) : (
-        <>
-          <div className="row">
-            <label>图片存放方式</label>
-            <div className="actions" style={{ flexWrap: 'wrap', gap: 12 }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  checked={!suiteForm.use_custom_image_root}
-                  onChange={() => setSuiteForm({ ...suiteForm, use_custom_image_root: false })}
-                />
-                托管子目录（推荐）
-              </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  checked={suiteForm.use_custom_image_root}
-                  onChange={() => setSuiteForm({ ...suiteForm, use_custom_image_root: true })}
-                />
-                高级：自定义 image_root
-              </label>
-            </div>
-          </div>
-          {!suiteForm.use_custom_image_root ? (
-            <div className="row">
-              <label>子目录名（将创建在「测试集根目录」下）</label>
-              <input
-                value={suiteForm.managed_subdir}
-                onChange={(e) => setSuiteForm({ ...suiteForm, managed_subdir: e.target.value })}
-                placeholder="例如 storefront-2026，勿含 / 或 .."
-              />
-            </div>
-          ) : (
-            <div className="row">
-              <label>图片根目录 image_root</label>
-              <input
-                className="mono"
-                value={suiteForm.image_root}
-                onChange={(e) => setSuiteForm({ ...suiteForm, image_root: e.target.value })}
-                placeholder="绝对路径，或相对启动后端时的当前目录，例如 ./data/images"
-              />
-            </div>
-          )}
-        </>
+        <div className="row">
+          <label>子目录名（将创建在「测试集根目录」下）</label>
+          <input
+            value={suiteForm.managed_subdir}
+            onChange={(e) => setSuiteForm({ ...suiteForm, managed_subdir: e.target.value })}
+            placeholder="例如 storefront-2026，勿含 / 或 .."
+          />
+        </div>
       )}
       <div className="row">
         <label>默认断言 JSON</label>
@@ -1046,65 +1040,128 @@ function SuitesSection(props: {
         />
       </div>
 
-      <h3 className="suiteSectionTitle">上传资源（可选）</h3>
+      <h3 className="suiteSectionTitle">导入资源</h3>
       <p className="muted">
-        将图片或 JSON 写入<strong>当前表单对应的</strong>磁盘目录。支持<strong>整文件夹上传</strong>。若尚未点过下方「保存」，首次上传会按上方表单<strong>自动创建测试集并落盘</strong>；与「保存」的区别是：保存专门把<strong>名称、image_root、默认断言</strong>写进数据库，改这几项后请再保存一次。
-        JSON 可为侧车或根目录清单 <span className="mono">image-tester-metadata.json</span> /{' '}
-        <span className="mono">metadata.json</span>。「保存子目录」通常留空。上传后仍需扫描导入或手动添加用例。
+        三种方式将图片与变量导入到测试集。<strong>导入时会自动从 metadata.json 读取变量写入数据库</strong>，之后运行只用数据库里的值。
       </p>
-      <div className="row row2">
-        <div>
-          <label>保存子目录（可选，相对 image_root）</label>
-          <input
-            value={uploadSubdir}
-            onChange={(e) => setUploadSubdir(e.target.value)}
-            placeholder="单文件可加前缀；整文件夹上传通常留空"
-          />
+
+      {/* 卡片A：文件夹导入 */}
+      <div className="uploadCard">
+        <div className="uploadCardTitle">A · 整文件夹导入（图片 + JSON 一起）</div>
+        <p className="muted" style={{ marginBottom: 8 }}>
+          选择本地文件夹上传，服务器会自动从 <span className="mono">metadata.json</span> / 侧车 <span className="mono">.json</span> 读取变量，一并写入数据库。
+        </p>
+        <div className="row row2">
+          <div>
+            <label>目标子目录（可选，相对 image_root）</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select
+                value={folderTargetDir}
+                onChange={(e) => setFolderTargetDir(e.target.value)}
+                style={{ flex: 1 }}
+              >
+                <option value="">根目录</option>
+                {uploadDirOptions.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+              <input
+                value={folderTargetDir}
+                onChange={(e) => setFolderTargetDir(e.target.value)}
+                placeholder="或手动输入"
+                style={{ flex: 1 }}
+              />
+            </div>
+          </div>
         </div>
+        <div className="row row2">
+          <div>
+            <label>选择本地文件夹</label>
+            <input
+              ref={folderUploadRef}
+              type="file"
+              multiple
+              {...({ webkitdirectory: '' } as InputHTMLAttributes<HTMLInputElement>)}
+            />
+          </div>
+          <div className="actions" style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn btnPrimary" onClick={() => void uploadFolderAndImport()}>
+              上传并导入
+            </button>
+          </div>
+        </div>
+        {folderTip ? (
+          <pre className="muted" style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 6 }}>{folderTip}</pre>
+        ) : null}
       </div>
-      <div className="row row2">
-        <div>
-          <label>上传图片（可多选）</label>
-          <input ref={imgUploadRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" />
+
+      {/* 卡片B：单独上传图片 */}
+      <div className="uploadCard">
+        <div className="uploadCardTitle">B · 单独上传图片</div>
+        <p className="muted" style={{ marginBottom: 8 }}>
+          上传图片并自动写入数据库，变量为空 <span className="mono">{'{}'}</span>。之后可用卡片 C 上传 metadata.json 覆盖变量。
+        </p>
+        <div className="row row2">
+          <div>
+            <label>目标子目录（可选）</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select
+                value={imgTargetDir}
+                onChange={(e) => setImgTargetDir(e.target.value)}
+                style={{ flex: 1 }}
+              >
+                <option value="">根目录</option>
+                {uploadDirOptions.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+              <input
+                value={imgTargetDir}
+                onChange={(e) => setImgTargetDir(e.target.value)}
+                placeholder="或手动输入"
+                style={{ flex: 1 }}
+              />
+            </div>
+          </div>
         </div>
-        <div className="actions" style={{ alignSelf: 'end' }}>
-          <button type="button" className="btn btnPrimary" onClick={() => void uploadSuiteFiles('images')}>
-            上传图片
-          </button>
+        <div className="row row2">
+          <div>
+            <label>选择图片（可多选）</label>
+            <input ref={imgUploadRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" />
+          </div>
+          <div className="actions" style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn btnPrimary" onClick={() => void uploadImages()}>
+              上传图片
+            </button>
+          </div>
         </div>
+        {imgTip ? (
+          <pre className="muted" style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 6 }}>{imgTip}</pre>
+        ) : null}
       </div>
-      <div className="row row2">
-        <div>
-          <label>上传 JSON（可多选）</label>
-          <input ref={jsonUploadRef} type="file" multiple accept=".json,application/json" />
+
+      {/* 卡片C：JSON 覆盖变量 */}
+      <div className="uploadCard">
+        <div className="uploadCardTitle">C · 用 JSON 覆盖已有用例变量</div>
+        <p className="muted" style={{ marginBottom: 8 }}>
+          选择 <span className="mono">metadata.json</span> 格式文件（<span className="mono">{"{ \"图片路径\": { variables, images } }"}</span>），将匹配到的用例变量覆盖写入数据库。<strong>只更新已存在用例，不新增。</strong><br />
+          <span style={{ color: 'var(--accent)' }}>⚠️ 前提：图片必须已通过卡片 A 导入或扫描导入过，否则 DB 里没有对应用例，覆盖会显示「未匹配」。</span>
+        </p>
+        <div className="row row2">
+          <div>
+            <label>选择 JSON 文件</label>
+            <input ref={jsonOverrideRef} type="file" accept=".json,application/json" />
+          </div>
+          <div className="actions" style={{ alignSelf: 'end' }}>
+            <button type="button" className="btn btnPrimary" onClick={() => void overrideFromJson()}>
+              覆盖变量
+            </button>
+          </div>
         </div>
-        <div className="actions" style={{ alignSelf: 'end' }}>
-          <button type="button" className="btn" onClick={() => void uploadSuiteFiles('json')}>
-            上传 JSON
-          </button>
-        </div>
+        {jsonOverrideTip ? (
+          <pre className="muted" style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 6 }}>{jsonOverrideTip}</pre>
+        ) : null}
       </div>
-      <div className="row row2">
-        <div>
-          <label>上传整个文件夹（含子目录中的图片与 JSON）</label>
-          <input
-            ref={folderUploadRef}
-            type="file"
-            multiple
-            {...({ webkitdirectory: '' } as InputHTMLAttributes<HTMLInputElement>)}
-          />
-        </div>
-        <div className="actions" style={{ alignSelf: 'end' }}>
-          <button type="button" className="btn btnPrimary" onClick={() => void uploadFolder()}>
-            上传文件夹
-          </button>
-        </div>
-      </div>
-      {uploadTip ? (
-        <pre className="muted" style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>
-          {uploadTip}
-        </pre>
-      ) : null}
 
       <div className="suiteSaveBlock">
         <h3 className="suiteSectionTitle" style={{ marginTop: 0 }}>
@@ -1221,25 +1278,12 @@ function SuitesSection(props: {
           </div>
           <div className="row">
             <label>
-              元数据 variables_json（库内基底；同名键会被 image_root 下清单与侧车 .json 覆盖，可填{' '}
-              <span className="mono">{'{}'}</span> 完全以磁盘为准）
+              变量 variables_json（直接存储于数据库；运行时使用此值）
             </label>
             <textarea
               value={caseForm.variables_json}
               onChange={(e) => setCaseForm({ ...caseForm, variables_json: e.target.value })}
             />
-          </div>
-          <div className="row">
-            <label>
-              生效元数据预览（侧车：与主图同名 .json；清单须在 image_root 根目录：
-              image-tester-metadata.json 或 metadata.json；每 3 秒自动刷新）
-            </label>
-            <div className="actions" style={{ marginBottom: 8 }}>
-              <button type="button" className="btn" onClick={() => void refreshResolvedCaseMetadata()}>
-                立即刷新
-              </button>
-            </div>
-            <textarea readOnly value={resolvedEffectiveJson} rows={8} className="mono" />
           </div>
           <div className="row">
             <label>用例级断言覆盖（可留空则使用测试集默认）</label>
@@ -1407,23 +1451,20 @@ function PreviewSection(props: {
     setUserPrompt(t.user_prompt_template)
   }
 
-  function loadTemplateIntoEditors() {
-    if (!templatePickId) {
-      props.onError('请先在「从已存模板载入」里选一个模板')
-      return
-    }
-    applyTemplateById(Number(templatePickId))
-  }
-
-  function setAppendModeExample() {
-    setUserPrompt(PREVIEW_APPEND_MODE_USER)
-    const p = relativePath.trim()
-    setMetadataJson(
-      p
-        ? JSON.stringify({ variables: { hint: '文末自动附图模式：images 可留空' }, images: {} }, null, 2)
-        : JSON.stringify({ variables: { hint: '先选好主图路径' }, images: {} }, null, 2),
-    )
-  }
+  const resolveMetadataFromSuite = useCallback(
+    async (suite: number, rel: string, baseVariablesJson: string) => {
+      const r = await postJson<{ metadata_json: string }>(`/api/test-suites/${suite}/resolve-case-metadata`, {
+        relative_image_path: rel,
+        variables_json: baseVariablesJson?.trim() ? baseVariablesJson : '{}',
+      })
+      if (isEmptyResolvedMetadata(r.metadata_json)) {
+        setMetadataJson(metadataJsonForPath(rel))
+        return
+      }
+      setMetadataJson(JSON.stringify(JSON.parse(r.metadata_json) as object, null, 2))
+    },
+    [],
+  )
 
   async function send() {
     const missing: string[] = []
@@ -1494,7 +1535,11 @@ function PreviewSection(props: {
       const c = cases.find((x) => x.id === id)
       if (!c) return
       setRelativePath(c.relative_image_path)
-      setMetadataJson(c.variables_json?.trim() ? c.variables_json : metadataJsonForPath(c.relative_image_path))
+      if (suiteId) {
+        void resolveMetadataFromSuite(Number(suiteId), c.relative_image_path, c.variables_json || '{}')
+      } else {
+        setMetadataJson(c.variables_json?.trim() ? c.variables_json : metadataJsonForPath(c.relative_image_path))
+      }
       props.onError(null)
       return
     }
@@ -1506,7 +1551,11 @@ function PreviewSection(props: {
         return
       }
       setRelativePath(rel)
-      setMetadataJson(metadataJsonForPath(rel))
+      if (suiteId) {
+        void resolveMetadataFromSuite(Number(suiteId), rel, '{}')
+      } else {
+        setMetadataJson(metadataJsonForPath(rel))
+      }
       props.onError(null)
     }
   }
@@ -1605,24 +1654,6 @@ function PreviewSection(props: {
                     </option>
                   ))}
                 </select>
-                <div className="previewWbChipRow">
-                  <button type="button" className="btn btnWb btnWbSm" onClick={loadTemplateIntoEditors}>
-                    再次载入
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btnWb btnWbSm"
-                    onClick={() => {
-                      setSystemPrompt(PREVIEW_DEFAULT_SYSTEM)
-                      setUserPrompt(PREVIEW_DEFAULT_USER)
-                    }}
-                  >
-                    教学示例
-                  </button>
-                  <button type="button" className="btn btnWb btnWbSm" onClick={setAppendModeExample}>
-                    文末附图
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -1762,7 +1793,23 @@ function PreviewSection(props: {
                 />
               </div>
               <div className="previewWbActions">
-                <button type="button" className="btn btnPrimary btnWbPrimary" onClick={applyMetadataForCurrentPath}>
+                <button
+                  type="button"
+                  className="btn btnPrimary btnWbPrimary"
+                  onClick={() => {
+                    const p = relativePath.trim()
+                    if (!p) {
+                      props.onError('请先填写或选择主图相对路径')
+                      return
+                    }
+                    if (!suiteId) {
+                      applyMetadataForCurrentPath()
+                      return
+                    }
+                    const c = cases.find((x) => x.relative_image_path === p)
+                    void resolveMetadataFromSuite(Number(suiteId), p, c?.variables_json || '{}')
+                  }}
+                >
                   按主图生成元数据
                 </button>
               </div>
@@ -1975,6 +2022,11 @@ function formatRunTime(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+function formatAvgDurationMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`
+  return `${Math.round(ms)} ms`
+}
+
 function ReportSection(props: {
   runs: TestRun[]
   suites: TestSuite[]
@@ -1988,6 +2040,7 @@ function ReportSection(props: {
   const [run, setRun] = useState<TestRun | null>(null)
   const [items, setItems] = useState<RunItemDetail[]>([])
   const [onlyFail, setOnlyFail] = useState(true)
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null)
 
   const suiteName = useMemo(() => {
     if (!run) return ''
@@ -2035,6 +2088,15 @@ function ReportSection(props: {
       setItems([])
     }
   }, [runId, loadRun])
+
+  useEffect(() => {
+    if (!previewImage) return
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setPreviewImage(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewImage])
 
   useEffect(() => {
     if (runId == null) return
@@ -2098,6 +2160,17 @@ function ReportSection(props: {
             <span className="fail">{run.fail_count}</span> · 错误{' '}
             <span className="fail">{run.error_count}</span> · 合计 {run.total_count}
             {rate != null ? <span> · 断言正确率（排除错误）约 {rate}%</span> : null}
+            {run.duration_stats &&
+            run.duration_stats.count > 0 &&
+            run.duration_stats.avg_ms != null ? (
+              <span>
+                {' '}
+                · 平均单条耗时 {formatAvgDurationMs(run.duration_stats.avg_ms)}（本次运行共{' '}
+                {run.duration_stats.count} 条已记录耗时，含通过/失败/错误）
+              </span>
+            ) : (
+              <span className="muted"> · 平均单条耗时：暂无（尚无已完成的耗时记录）</span>
+            )}
           </div>
           <div className="reportRunMetaGrid">
             <div>
@@ -2167,7 +2240,23 @@ function ReportSection(props: {
               <div className="reportItemThumbCol">
                 <div className="muted">用例 #{it.case_id}</div>
                 <div className="mono">{it.relative_image_path}</div>
-                <img className="thumb reportItemThumb" alt="" src={imageUrl(it.suite_id, it.relative_image_path)} />
+                <button
+                  type="button"
+                  className="reportThumbBtn"
+                  onClick={() =>
+                    setPreviewImage({
+                      src: imageUrl(it.suite_id, it.relative_image_path),
+                      alt: it.relative_image_path,
+                    })
+                  }
+                  title="点击查看大图"
+                >
+                  <img
+                    className="thumb reportItemThumb"
+                    alt={it.relative_image_path}
+                    src={imageUrl(it.suite_id, it.relative_image_path)}
+                  />
+                </button>
               </div>
               <div className="reportItemDetailCol">
                 <div className="muted">模型输出（参与断言的文本）</div>
@@ -2196,6 +2285,25 @@ function ReportSection(props: {
           </div>
         )
       })}
+
+      {previewImage ? (
+        <div className="reportImageOverlay" onClick={() => setPreviewImage(null)}>
+          <button
+            type="button"
+            className="reportImageClose"
+            onClick={() => setPreviewImage(null)}
+            aria-label="关闭大图"
+          >
+            关闭
+          </button>
+          <img
+            className="reportImageLarge"
+            src={previewImage.src}
+            alt={previewImage.alt}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

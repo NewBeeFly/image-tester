@@ -95,6 +95,12 @@ export interface TestCase {
   created_at: string;
 }
 
+/** GET /api/test-runs/:id 在运行详情上附带：全量用例中有耗时的条目的平均值。 */
+export interface RunDurationStats {
+  avg_ms: number | null;
+  count: number;
+}
+
 export interface TestRun {
   id: number;
   suite_id: number;
@@ -113,6 +119,7 @@ export interface TestRun {
   finished_at: string | null;
   last_error: string | null;
   created_at: string;
+  duration_stats?: RunDurationStats;
 }
 
 export interface TestRunItem {

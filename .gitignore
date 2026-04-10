@@ -2,6 +2,20 @@ node_modules/
 dist/
 build/
 .env
+# 其它环境文件（保留 .env.example 供提交）
+.env.*
+!.env.example
+web/.env.local
+web/.env.development.local
+web/.env.production.local
+# 日志与缓存
+*.log
+npm-debug.log*
+.cache/
+# 托管测试集运行时写入的图片/JSON（保留空目录占位）
+data/test-suites/**
+!data/test-suites/.gitkeep
+# 本地 SQLite 与锁文件
 *.db
 *.db-wal
 *.db-shm
@@ -9,4 +23,3 @@ build/
 *.sqlite
 .DS_Store
 server/data/*.db
-web/.env.local

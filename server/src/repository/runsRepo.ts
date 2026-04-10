@@ -243,3 +243,24 @@ export function listRunItemsAll(db: Database.Database, runId: number): TestRunIt
     .prepare(`SELECT * FROM test_run_items WHERE run_id = ? ORDER BY id ASC`)
     .all(runId) as TestRunItem[];
 }
+
+export interface RunDurationStats {
+  avg_ms: number | null;
+  count: number;
+}
+
+/** 本次运行全部用例中有 duration_ms 的记录（pending/running 通常为 null，不计入）。 */
+export function getRunDurationStats(db: Database.Database, runId: number): RunDurationStats {
+  const row = db
+    .prepare(
+      `SELECT AVG(duration_ms) AS avg_ms, COUNT(*) AS cnt
+       FROM test_run_items
+       WHERE run_id = ? AND duration_ms IS NOT NULL`,
+    )
+    .get(runId) as { avg_ms: number | null; cnt: number | bigint | null };
+  const cnt = Number(row.cnt ?? 0);
+  if (!cnt || row.avg_ms == null) {
+    return { avg_ms: null, count: 0 };
+  }
+  return { avg_ms: Number(row.avg_ms), count: cnt };
+}

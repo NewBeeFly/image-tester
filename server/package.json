@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "init-db": "node dist/cli/init-database.js",
+    "init-db:dev": "tsx src/cli/init-database.ts"
   },
   "keywords": [],
   "author": "",

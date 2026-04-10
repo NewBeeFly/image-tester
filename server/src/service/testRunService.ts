@@ -9,7 +9,6 @@ import * as runsRepo from '../repository/runsRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import type { AssertionConfig, TestRunItem } from '../model/types.js';
 import { buildVisionRequestParts } from '../utils/multimodalPrompt.js';
-import { resolveMergedMetadataJson } from '../utils/caseMetadataMerge.js';
 
 export const runEventBus = new EventEmitter();
 runEventBus.setMaxListeners(200);
@@ -154,15 +153,10 @@ async function processRunItem(
   runsRepo.updateRunItem(db, item.id, { status: 'running' });
 
   try {
-    const metadataJson = resolveMergedMetadataJson(
-      imageRoot,
-      testCase.relative_image_path,
-      testCase.variables_json,
-    );
     const { system: systemContent, user: userParts, variables } = await buildVisionRequestParts(
       prompt.system_prompt,
       prompt.user_prompt_template,
-      metadataJson,
+      testCase.variables_json || '{}',
       imageRoot,
       testCase.relative_image_path,
     );
