@@ -9,18 +9,34 @@ const projectRoot = path.resolve(__dirname, '..')
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, projectRoot, '')
+  /** 与根目录 .env 的 PORT 一致：后端 API 端口（Vite 自身默认仍为 5173） */
   const n = Number(env.PORT)
-  const port = Number.isFinite(n) && n > 0 ? n : 8787
-  const apiTarget = `http://127.0.0.1:${port}`
+  const apiPort = Number.isFinite(n) && n > 0 ? n : 8787
+  const apiTarget = `http://127.0.0.1:${apiPort}`
   const apiProxy = {
     '/api': { target: apiTarget, changeOrigin: true },
     '/health': { target: apiTarget, changeOrigin: true },
   } as const
 
+  /**
+   * 根目录 HOST=0.0.0.0 只作用于后端 Fastify；Vite 需单独设 host。
+   * 与后端一致：当 HOST 为 0.0.0.0 时，开发服务器也监听局域网（或设 VITE_DEV_HOST=true）。
+   */
+  const exposeToLan =
+    env.HOST === '0.0.0.0' ||
+    env.VITE_DEV_HOST === 'true' ||
+    env.VITE_DEV_HOST === '0.0.0.0'
+
   return {
     plugins: [react()],
-    server: { proxy: { ...apiProxy } },
+    server: {
+      host: exposeToLan ? true : false,
+      proxy: { ...apiProxy },
+    },
     /** `vite preview` 本地看 dist 时同样转发 /api，需另开 server */
-    preview: { proxy: { ...apiProxy } },
+    preview: {
+      host: exposeToLan ? true : false,
+      proxy: { ...apiProxy },
+    },
   }
 })
