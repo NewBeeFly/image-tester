@@ -23,6 +23,7 @@ import * as providersRepo from '../repository/providersRepo.js';
 import * as runsRepo from '../repository/runsRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import { scanImagesUnderSuiteRoot } from '../service/scanService.js';
+import { cleanupCaseAssets } from '../service/caseAssetCleanup.js';
 import { normalizeUploadSubdir, writeSuiteAsset } from '../service/suiteAssetUpload.js';
 import { runVisionPreview } from '../service/visionPreviewService.js';
 import { cancelRun, startTestRun, subscribeRun } from '../service/testRunService.js';
@@ -244,11 +245,22 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
 
   app.delete('/api/test-cases/:id', async (req) => {
     const id = Number((req.params as { id: string }).id);
+    const testCase = suitesRepo.getTestCase(db, id);
+    if (!testCase) {
+      const err = new Error('用例不存在或已删除');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    const suite = suitesRepo.getTestSuite(db, testCase.suite_id);
     const ok = suitesRepo.deleteTestCase(db, id);
     if (!ok) {
       const err = new Error('用例不存在或已删除');
       (err as Error & { statusCode?: number }).statusCode = 404;
       throw err;
+    }
+    if (suite) {
+      cleanupCaseAssets(suite.image_root, testCase.relative_image_path);
+      invalidateCaseMetadataManifestCache(suite.image_root);
     }
     return { ok: true };
   });

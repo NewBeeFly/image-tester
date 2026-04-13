@@ -940,10 +940,40 @@ function SuitesSection(props: {
       return
     }
     props.onError(null)
-    setJsonOverrideTip('覆盖中…')
     try {
+      const file = raw[0]
+      const text = await file.text()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        props.onError('JSON 内容无法解析，请检查格式')
+        return
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        props.onError('JSON 顶层必须是对象，格式如：{ "子目录/图片.jpg": { variables, images } }')
+        return
+      }
+      const payload = parsed as Record<string, unknown>
+      const keys = Object.keys(payload)
+      if (!keys.length) {
+        props.onError('JSON 里没有可覆盖的图片路径')
+        return
+      }
+      const existingPaths = new Set(cases.map((c) => c.relative_image_path))
+      const missing = keys.filter((k) => !existingPaths.has(k))
+      if (missing.length) {
+        const sample = missing.slice(0, 5).join('、')
+        const more = missing.length > 5 ? `…等 ${missing.length} 条` : ''
+        props.onError(
+          `已拦截覆盖：JSON 中有 ${missing.length} 条路径不在当前测试集用例中（${sample}${more}）。请先扫描并导入这些图片，或从 JSON 中移除后再覆盖。`,
+        )
+        return
+      }
+
+      setJsonOverrideTip('覆盖中…')
       const fd = new FormData()
-      fd.append('file', raw[0])
+      fd.append('file', file)
       const r = await postFormData<{ updated: number; not_found: string[] }>(
         `/api/test-suites/${dataSuiteId}/cases/override-from-json`,
         fd,
