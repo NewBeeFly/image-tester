@@ -24,6 +24,8 @@ import * as runsRepo from '../repository/runsRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import { scanImagesUnderSuiteRoot } from '../service/scanService.js';
 import { cleanupCaseAssets } from '../service/caseAssetCleanup.js';
+import { cleanupSuiteAssets } from '../service/suiteAssetCleanup.js';
+import { cleanupSuiteConsistency } from '../service/suiteConsistencyCleanup.js';
 import { normalizeUploadSubdir, writeSuiteAsset } from '../service/suiteAssetUpload.js';
 import { runVisionPreview } from '../service/visionPreviewService.js';
 import { cancelRun, startTestRun, subscribeRun } from '../service/testRunService.js';
@@ -175,12 +177,19 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
 
   app.delete('/api/test-suites/:id', async (req) => {
     const id = Number((req.params as { id: string }).id);
+    const suite = suitesRepo.getTestSuite(db, id);
+    if (!suite) {
+      const err = new Error('测试集不存在或已删除');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
     const ok = suitesRepo.deleteTestSuite(db, id);
     if (!ok) {
       const err = new Error('测试集不存在或已删除');
       (err as Error & { statusCode?: number }).statusCode = 404;
       throw err;
     }
+    cleanupSuiteAssets(suite.image_root);
     invalidateCaseMetadataManifestCache();
     return { ok: true };
   });
@@ -385,6 +394,25 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     }
 
     return { updated, not_found };
+  });
+
+  /**
+   * 一键清理测试集内不一致数据：
+   * - DB 有但图片文件不存在：删 DB 用例
+   * - 图片文件存在但 DB 没有：删文件
+   * 同时清理 metadata 清单条目，避免脏数据回流。
+   */
+  app.post('/api/test-suites/:suiteId/cleanup-consistency', async (req) => {
+    const suiteId = Number((req.params as { suiteId: string }).suiteId);
+    const suite = suitesRepo.getTestSuite(db, suiteId);
+    if (!suite) {
+      const err = new Error('测试集不存在');
+      (err as Error & { statusCode?: number }).statusCode = 404;
+      throw err;
+    }
+    const result = await cleanupSuiteConsistency(db, suite);
+    invalidateCaseMetadataManifestCache(suite.image_root);
+    return result;
   });
 
   /** 列出 image_root 下的子目录（一层或递归，depth 参数控制） */

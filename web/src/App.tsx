@@ -595,6 +595,7 @@ function SuitesSection(props: {
   const [imgTargetDir, setImgTargetDir] = useState('')
   const [imgTip, setImgTip] = useState('')
   const [jsonOverrideTip, setJsonOverrideTip] = useState('')
+  const [cleanupTip, setCleanupTip] = useState('')
 
   const imgUploadRef = useRef<HTMLInputElement>(null)
   const folderUploadRef = useRef<HTMLInputElement>(null)
@@ -641,6 +642,7 @@ function SuitesSection(props: {
     setFolderTip('')
     setImgTip('')
     setJsonOverrideTip('')
+    setCleanupTip('')
   }, [dataSuiteId])
 
   function beginNewSuite() {
@@ -996,6 +998,38 @@ function SuitesSection(props: {
     }
   }
 
+  /** 一键清理 DB/文件夹不一致数据 */
+  async function cleanupSuiteInconsistency() {
+    if (dataSuiteId == null) {
+      props.onError('请先选择测试集')
+      return
+    }
+    const ok = window.confirm(
+      '将清理不一致数据：\n1) 删除数据库中“图片文件已不存在”的用例\n2) 删除文件夹中“数据库无记录”的图片\n并同步清理 metadata 条目。\n\n确认继续吗？',
+    )
+    if (!ok) return
+
+    props.onError(null)
+    setCleanupTip('清理中…')
+    try {
+      const r = await postJson<{
+        removed_db_cases: number
+        removed_files: number
+        removed_metadata_entries: number
+        kept_db_cases: number
+        kept_files: number
+      }>(`/api/test-suites/${dataSuiteId}/cleanup-consistency`, {})
+      setCleanupTip(
+        `清理完成：删除 DB 用例 ${r.removed_db_cases} 条，删除文件 ${r.removed_files} 个，清理 metadata 条目 ${r.removed_metadata_entries} 条。\n当前保留：DB 用例 ${r.kept_db_cases} 条，文件 ${r.kept_files} 个。`,
+      )
+      await refreshCases(dataSuiteId)
+      props.onChange()
+    } catch (e) {
+      props.onError((e as Error).message)
+      setCleanupTip('')
+    }
+  }
+
   return (
     <div className="panel">
       <h2>测试集</h2>
@@ -1279,8 +1313,14 @@ function SuitesSection(props: {
               <button type="button" className="btn btnPrimary" onClick={() => void importSelected()}>
                 导入选中
               </button>
+              <button type="button" className="btn btnDanger" onClick={() => void cleanupSuiteInconsistency()}>
+                清理不一致数据
+              </button>
             </div>
           </div>
+          {cleanupTip ? (
+            <pre className="muted" style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 6 }}>{cleanupTip}</pre>
+          ) : null}
           {scanPaths.length ? (
             <div className="scanList">
               {scanPaths.map((p) => (
