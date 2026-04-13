@@ -91,6 +91,8 @@ const defaultAssertionExample = `{
 export default function App() {
   const [tab, setTab] = useState<Tab>('providers')
   const [error, setError] = useState<string | null>(null)
+  const [runPresetSuiteId, setRunPresetSuiteId] = useState<number | null>(null)
+  const [reportPresetRunId, setReportPresetRunId] = useState<number | null>(null)
 
   const [providers, setProviders] = useState<ProviderProfile[]>([])
   const [prompts, setPrompts] = useState<PromptProfile[]>([])
@@ -187,7 +189,20 @@ export default function App() {
         <PromptsSection items={prompts} onChange={() => void refreshAll()} onError={setError} />
       ) : null}
       {tab === 'suites' ? (
-        <SuitesSection suites={suites} onChange={() => void refreshAll()} onError={setError} />
+        <SuitesSection
+          suites={suites}
+          runs={runs}
+          onChange={() => void refreshAll()}
+          onError={setError}
+          onGoRun={(suiteId) => {
+            setRunPresetSuiteId(suiteId)
+            setTab('run')
+          }}
+          onGoReport={(runId) => {
+            setReportPresetRunId(runId)
+            setTab('report')
+          }}
+        />
       ) : null}
       {tab === 'preview' ? (
         <PreviewSection
@@ -202,6 +217,7 @@ export default function App() {
           suites={suites}
           providers={providers}
           prompts={prompts}
+          preferredSuiteId={runPresetSuiteId}
           onStarted={() => void refreshAll()}
           onError={setError}
         />
@@ -212,6 +228,7 @@ export default function App() {
           suites={suites}
           providers={providers}
           prompts={prompts}
+          preferredRunId={reportPresetRunId}
           onRefreshRunsList={refreshRunsOnly}
           onError={setError}
         />
@@ -574,8 +591,11 @@ function emptyCaseForm() {
 
 function SuitesSection(props: {
   suites: TestSuite[]
+  runs: TestRun[]
   onChange: () => void
   onError: (m: string | null) => void
+  onGoRun: (suiteId: number) => void
+  onGoReport: (runId: number) => void
 }) {
   const [suiteForm, setSuiteForm] = useState(emptySuiteForm)
   const [suiteEditingId, setSuiteEditingId] = useState<number | null>(null)
@@ -596,6 +616,23 @@ function SuitesSection(props: {
   const [imgTip, setImgTip] = useState('')
   const [jsonOverrideTip, setJsonOverrideTip] = useState('')
   const [cleanupTip, setCleanupTip] = useState('')
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorMode, setEditorMode] = useState<'new' | 'edit'>('new')
+
+  /** 用例列表「编辑」：弹窗内改单条图片用例 */
+  const [caseModal, setCaseModal] = useState<{
+    open: boolean
+    id: number | null
+    relative_image_path: string
+    variables_json: string
+    assertions_override_json: string
+  }>({
+    open: false,
+    id: null,
+    relative_image_path: '',
+    variables_json: '{\n  "variables": {},\n  "images": {}\n}',
+    assertions_override_json: '',
+  })
 
   const imgUploadRef = useRef<HTMLInputElement>(null)
   const folderUploadRef = useRef<HTMLInputElement>(null)
@@ -663,8 +700,36 @@ function SuitesSection(props: {
     props.onError(null)
   }
 
-  function startEditSuite(s: TestSuite) {
+  useEffect(() => {
+    if (!caseModal.open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (caseModal.open) setCaseModal((m) => ({ ...m, open: false }))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [caseModal.open])
+
+  const latestRunBySuite = useMemo(() => {
+    const m = new Map<number, TestRun>()
+    for (const r of props.runs) {
+      const old = m.get(r.suite_id)
+      if (!old || r.id > old.id) m.set(r.suite_id, r)
+    }
+    return m
+  }, [props.runs])
+
+  function openEditWorkspace(s: TestSuite) {
     loadSuiteIntoForm(s)
+    setEditorMode('edit')
+    setEditorOpen(true)
+  }
+
+  function openNewWorkspace() {
+    beginNewSuite()
+    setEditorMode('new')
+    setEditorOpen(true)
   }
 
   async function createSuiteFromForm(): Promise<TestSuite> {
@@ -730,17 +795,40 @@ function SuitesSection(props: {
   }
 
   function startEditCase(c: TestCase) {
-    setCaseEditingId(c.id)
     const rawVars = c.variables_json || '{}'
     let pretty = rawVars
-    try {
-      pretty = JSON.stringify(JSON.parse(rawVars) as object, null, 2)
-    } catch { /* keep raw */ }
-    setCaseForm({
+    try { pretty = JSON.stringify(JSON.parse(rawVars) as object, null, 2) } catch { /* keep raw */ }
+    setCaseModal({
+      open: true,
+      id: c.id,
       relative_image_path: c.relative_image_path,
       variables_json: pretty,
       assertions_override_json: c.assertions_override_json ?? '',
     })
+    props.onError(null)
+  }
+
+  function closeCaseModal() {
+    setCaseModal((m) => ({ ...m, open: false }))
+  }
+
+  async function saveCaseModalAndClose() {
+    if (caseModal.id == null) return
+    props.onError(null)
+    try {
+      const payload = {
+        relative_image_path: caseModal.relative_image_path,
+        variables_json: caseModal.variables_json || '{}',
+        assertions_override_json: caseModal.assertions_override_json.trim()
+          ? caseModal.assertions_override_json
+          : null,
+      }
+      await patchJson(`/api/test-cases/${caseModal.id}`, payload)
+      if (dataSuiteId != null) await refreshCases(dataSuiteId)
+      closeCaseModal()
+    } catch (e) {
+      props.onError((e as Error).message)
+    }
   }
 
   async function saveCase() {
@@ -1033,36 +1121,111 @@ function SuitesSection(props: {
   return (
     <div className="panel">
       <h2>测试集</h2>
-      <p className="muted">
-        顶部选择「新建」或已有测试集；中间按顺序填写目录、（可选）上传文件；<strong>最下方「保存测试集」</strong>把名称、图片根目录与默认断言写入数据库。断言为 JSON：{' '}
-        <span className="mono">{'{ "rules": [ ... ] }'}</span>。
-      </p>
-      {/* 顶部：测试集选择器 + 状态 badge */}
-      <div className="suiteHeader">
-        <div className="suiteHeaderSelect">
-          <label className="suiteHeaderLabel">当前测试集</label>
-          <select
-            className="suiteHeaderDropdown"
-            value={suiteId ?? ''}
-            onChange={(e) => {
-              const v = e.target.value
-              if (!v) { beginNewSuite(); return }
-              const s = props.suites.find((x) => x.id === Number(v))
-              if (s) loadSuiteIntoForm(s)
-            }}
-          >
-            <option value="">— 新建测试集 —</option>
-            {props.suites.map((s) => (
-              <option key={s.id} value={s.id}>{s.id} · {s.name}</option>
-            ))}
-          </select>
-        </div>
-        <span className={suiteEditingId != null ? 'suiteBadge suiteBadge--editing' : 'suiteBadge suiteBadge--new'}>
-          {suiteEditingId != null
-            ? `编辑中 #${suiteEditingId}${activeSuite ? ` · ${activeSuite.name}` : ''}`
-            : '新建（未入库）'}
-        </span>
+      <div className="actions" style={{ justifyContent: 'space-between' }}>
+        <p className="muted" style={{ margin: 0 }}>
+          先看列表；点「编辑」或右侧「新建测试集」再展开编辑区。
+        </p>
+        <button type="button" className="btn btnPrimary" onClick={openNewWorkspace}>
+          新建测试集
+        </button>
       </div>
+
+      <h3 className="suiteSectionTitle">已有测试集</h3>
+      <div className="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>名称</th>
+              <th>最新测试率</th>
+              <th>image_root</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {props.suites.map((s) => {
+              const latestRun = latestRunBySuite.get(s.id)
+              const denom = latestRun ? latestRun.total_count - latestRun.error_count : 0
+              const passRate = latestRun && denom > 0 ? `${((latestRun.pass_count / denom) * 100).toFixed(1)}%` : '—'
+              return (
+                <tr key={s.id}>
+                  <td>{s.id}</td>
+                  <td>{s.name}</td>
+                  <td className="mono">{latestRun ? `${passRate} (#${latestRun.id})` : '—'}</td>
+                  <td className="mono">{s.image_root}</td>
+                  <td>
+                    <div className="actions" style={{ marginTop: 0 }}>
+                      <button type="button" className="btn" onClick={() => openEditWorkspace(s)}>
+                        编辑
+                      </button>
+                      <button type="button" className="btn" onClick={() => props.onGoRun(s.id)}>
+                        执行测试
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={!latestRun}
+                        onClick={() => latestRun && props.onGoReport(latestRun.id)}
+                      >
+                        最新报告
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btnDanger"
+                        onClick={() =>
+                          void (async () => {
+                            props.onError(null)
+                            try {
+                              await delJson<{ ok: boolean }>(`/api/test-suites/${s.id}`)
+                              if (suiteId === s.id || suiteEditingId === s.id) beginNewSuite()
+                              props.onChange()
+                            } catch (e) {
+                              props.onError((e as Error).message)
+                            }
+                          })()
+                        }
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {editorOpen ? (
+        <>
+          <div className="suiteHeader">
+            <div className="suiteHeaderSelect">
+              <label className="suiteHeaderLabel">当前测试集</label>
+              <select
+                className="suiteHeaderDropdown"
+                value={suiteId ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (!v) { beginNewSuite(); return }
+                  const s = props.suites.find((x) => x.id === Number(v))
+                  if (s) loadSuiteIntoForm(s)
+                }}
+              >
+                <option value="">— 新建测试集 —</option>
+                {props.suites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.id} · {s.name}</option>
+                ))}
+              </select>
+            </div>
+            <span className={suiteEditingId != null ? 'suiteBadge suiteBadge--editing' : 'suiteBadge suiteBadge--new'}>
+              {editorMode === 'new'
+                ? '新建（未入库）'
+                : `编辑中 #${suiteEditingId ?? ''}${activeSuite ? ` · ${activeSuite.name}` : ''}`}
+            </span>
+            <button type="button" className="btn" onClick={() => setEditorOpen(false)}>
+              收起编辑区
+            </button>
+          </div>
 
       {/* 共用根目录信息栏 */}
       <div className="suiteRootBar">
@@ -1245,54 +1408,6 @@ function SuitesSection(props: {
         </div>
       </div>
 
-      <h2 style={{ marginTop: 24 }}>已有测试集</h2>
-      <div className="tableWrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>名称</th>
-              <th>image_root</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {props.suites.map((s) => (
-              <tr key={s.id}>
-                <td>{s.id}</td>
-                <td>{s.name}</td>
-                <td className="mono">{s.image_root}</td>
-                <td>
-                  <div className="actions" style={{ marginTop: 0 }}>
-                    <button type="button" className="btn" onClick={() => startEditSuite(s)}>
-                      编辑
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btnDanger"
-                      onClick={() =>
-                        void (async () => {
-                          props.onError(null)
-                          try {
-                            await delJson<{ ok: boolean }>(`/api/test-suites/${s.id}`)
-                            if (suiteId === s.id || suiteEditingId === s.id) beginNewSuite()
-                            props.onChange()
-                          } catch (e) {
-                            props.onError((e as Error).message)
-                          }
-                        })()
-                      }
-                    >
-                      删除
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
       <h2 style={{ marginTop: 24 }}>用例与扫描</h2>
       <p className="muted">
         当前 image_root：<span className="mono">{activeSuite?.image_root ?? '（请先保存测试集、上传，或从上方选择已有测试集）'}</span>
@@ -1432,6 +1547,68 @@ function SuitesSection(props: {
       ) : (
         <p className="muted">请从上方选择已有测试集，或填写表单后保存 / 直接上传资源，即可配置用例与扫描。</p>
       )}
+      </>
+      ) : null}
+
+      {caseModal.open ? (
+        <div
+          className="modalOverlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="caseModalTitle"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeCaseModal()
+          }}
+        >
+          <div className="modalDialog modalDialog--case" onClick={(ev) => ev.stopPropagation()}>
+            <div className="modalHeader">
+              <h3 id="caseModalTitle">编辑图片用例</h3>
+              <button type="button" className="btn modalCloseBtn" onClick={closeCaseModal} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="modalBody">
+              <p className="muted" style={{ fontSize: 12, margin: '0 0 10px' }}>
+                在这里修改单条图片用例：图片路径、variables_json、用例级断言覆盖。
+              </p>
+              <div className="row" style={{ marginBottom: 10 }}>
+                <label>图片相对路径（相对 image_root）</label>
+                <input
+                  value={caseModal.relative_image_path}
+                  onChange={(e) => setCaseModal((m) => ({ ...m, relative_image_path: e.target.value }))}
+                />
+              </div>
+              <div className="row" style={{ marginBottom: 10 }}>
+                <label>变量 variables_json</label>
+                <textarea
+                  className="modalTextarea"
+                  value={caseModal.variables_json}
+                  onChange={(e) => setCaseModal((m) => ({ ...m, variables_json: e.target.value }))}
+                  spellCheck={false}
+                />
+              </div>
+              <div className="row" style={{ marginBottom: 0 }}>
+                <label>用例级断言覆盖（可留空）</label>
+                <textarea
+                  className="modalTextarea modalTextarea--small"
+                  value={caseModal.assertions_override_json}
+                  onChange={(e) => setCaseModal((m) => ({ ...m, assertions_override_json: e.target.value }))}
+                  spellCheck={false}
+                />
+              </div>
+            </div>
+            <div className="modalFooter actions">
+              <button type="button" className="btn" onClick={closeCaseModal}>
+                关闭
+              </button>
+              <button type="button" className="btn btnPrimary" onClick={() => void saveCaseModalAndClose()}>
+                保存并关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   )
 }
@@ -1907,6 +2084,7 @@ function RunSection(props: {
   suites: TestSuite[]
   providers: ProviderProfile[]
   prompts: PromptProfile[]
+  preferredSuiteId?: number | null
   onStarted: () => void
   onError: (m: string | null) => void
 }) {
@@ -1927,6 +2105,14 @@ function RunSection(props: {
       if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    const sid = props.preferredSuiteId
+    if (!sid) return
+    if (props.suites.some((s) => s.id === sid)) {
+      setSuiteId(sid)
+    }
+  }, [props.preferredSuiteId, props.suites])
 
   async function start() {
     if (!suiteId || !providerId || !promptId) {
@@ -2102,6 +2288,7 @@ function ReportSection(props: {
   suites: TestSuite[]
   providers: ProviderProfile[]
   prompts: PromptProfile[]
+  preferredRunId?: number | null
   onRefreshRunsList?: () => void
   onError: (m: string | null) => void
 }) {
@@ -2158,6 +2345,14 @@ function ReportSection(props: {
       setItems([])
     }
   }, [runId, loadRun])
+
+  useEffect(() => {
+    const rid = props.preferredRunId
+    if (!rid) return
+    if (runs.some((r) => r.id === rid)) {
+      setRunId(rid)
+    }
+  }, [props.preferredRunId, runs])
 
   useEffect(() => {
     if (!previewImage) return

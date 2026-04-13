@@ -1175,3 +1175,88 @@ select.mono {
 .reportRawDetails summary:hover {
   color: var(--text);
 }
+
+/* ── 测试集：编辑弹窗 ── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.modalDialog {
+  width: 100%;
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.modalDialog--suite {
+  max-width: 520px;
+}
+
+.modalDialog--case {
+  max-width: 760px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modalHeader h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.modalCloseBtn {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  min-width: auto;
+}
+
+.modalBody {
+  padding: 14px 16px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.modalTextarea {
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.modalTextarea--small {
+  min-height: 120px;
+}
+
+.modalFooter {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+  margin: 0;
+}

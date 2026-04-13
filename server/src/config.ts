@@ -5,8 +5,26 @@ import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+/**
+ * 兼容不同启动方式（根目录 npm run dev、server 目录启动、dist 启动）加载 .env。
+ * 后加载的文件会覆盖同名变量，确保用户修改 .env 后重启即可生效。
+ */
+function loadEnvFiles(): void {
+  const candidates = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../.env'),
+    path.resolve(__dirname, '../../.env'),
+    path.resolve(__dirname, '../../../.env'),
+    path.resolve(__dirname, '../.env'),
+  ];
+  const uniq = Array.from(new Set(candidates));
+  for (const p of uniq) {
+    if (!fs.existsSync(p)) continue;
+    dotenv.config({ path: p, override: true });
+  }
+}
+
+loadEnvFiles();
 
 const rootDir = path.resolve(__dirname, '../..');
 
