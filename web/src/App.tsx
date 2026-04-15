@@ -6,7 +6,7 @@ import {
   useState,
   type InputHTMLAttributes,
 } from 'react'
-import { flushSync } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import './App.css'
 import {
   type AppConfig,
@@ -1572,7 +1572,8 @@ function SuitesSection(props: {
       </>
       ) : null}
 
-      {caseModal.open ? (
+      {caseModal.open && typeof document !== 'undefined'
+        ? createPortal(
         <div
           className="modalOverlay"
           role="dialog"
@@ -1629,7 +1630,8 @@ function SuitesSection(props: {
             </div>
           </div>
         </div>
-      ) : null}
+        , document.body)
+        : null}
 
     </div>
   )
