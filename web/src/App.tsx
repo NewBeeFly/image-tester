@@ -2298,6 +2298,7 @@ function ReportSection(props: {
   const [items, setItems] = useState<RunItemDetail[]>([])
   const [onlyFail, setOnlyFail] = useState(true)
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null)
+  const [stopBusy, setStopBusy] = useState(false)
 
   const suiteName = useMemo(() => {
     if (!run) return ''
@@ -2389,6 +2390,23 @@ function ReportSection(props: {
     return ((run.pass_count / denom) * 100).toFixed(1)
   }, [run])
 
+  const canStopRun = Boolean(run && (run.status === 'pending' || run.status === 'running'))
+
+  async function stopRunNow() {
+    if (runId == null || !run) return
+    onError(null)
+    setStopBusy(true)
+    try {
+      await postJson<{ ok: boolean }>(`/api/test-runs/${runId}/cancel`, {})
+      await loadRun(runId)
+      onRefreshRunsList?.()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setStopBusy(false)
+    }
+  }
+
   return (
     <div className="panel">
       <h2>运行记录</h2>
@@ -2409,6 +2427,16 @@ function ReportSection(props: {
             <input type="checkbox" checked={onlyFail} onChange={(e) => setOnlyFail(e.target.checked)} />
             仅看未通过
           </label>
+          {runId != null && canStopRun ? (
+            <button
+              type="button"
+              className="btn btnDanger"
+              disabled={stopBusy}
+              onClick={() => void stopRunNow()}
+            >
+              {stopBusy ? '正在停止…' : '立即停止'}
+            </button>
+          ) : null}
           <button type="button" className="btn" onClick={() => runId && void loadRun(runId)}>
             刷新本运行
           </button>
