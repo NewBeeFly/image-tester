@@ -492,6 +492,28 @@ function PromptsSection(props: {
     }
   }
 
+  async function removePromptProfile(id: number) {
+    props.onError(null)
+    try {
+      await delJson<{ ok: boolean }>(`/api/prompt-profiles/${id}`)
+      props.onChange()
+    } catch (e) {
+      const msg = (e as Error).message || '删除失败'
+      if (msg.includes('是否强制删除')) {
+        const yes = window.confirm(`${msg}\n\n点击“确定”将强制删除：先删关联报告，再删提示词模板。`)
+        if (!yes) return
+        try {
+          await delJson<{ ok: boolean; deleted_runs: number }>(`/api/prompt-profiles/${id}?force=true`)
+          props.onChange()
+        } catch (e2) {
+          props.onError((e2 as Error).message)
+        }
+        return
+      }
+      props.onError(msg)
+    }
+  }
+
   return (
     <div className="panel">
       <h2>{editingId != null ? `编辑提示词模板 #${editingId}` : '新增提示词模板'}</h2>
@@ -557,7 +579,7 @@ function PromptsSection(props: {
                     <button
                       type="button"
                       className="btn btnDanger"
-                      onClick={() => void delJson(`/api/prompt-profiles/${p.id}`).then(props.onChange)}
+                      onClick={() => void removePromptProfile(p.id)}
                     >
                       删除
                     </button>

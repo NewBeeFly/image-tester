@@ -130,8 +130,23 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
 
   app.delete('/api/prompt-profiles/:id', async (req) => {
     const id = Number((req.params as { id: string }).id);
-    const ok = promptsRepo.deletePromptProfile(db, id);
-    return { ok };
+    const q = (req.query ?? {}) as { force?: string };
+    const force = String(q.force ?? '').toLowerCase() === 'true';
+    const dep = promptsRepo.getPromptProfileRunDependency(db, id);
+    if (dep.run_count > 0 && !force) {
+      const hint = dep.latest_run_ids.length
+        ? `最近运行ID：${dep.latest_run_ids.map((x) => `#${x}`).join('、')}`
+        : '';
+      const err = new Error(
+        `该提示词被 ${dep.run_count} 条报告引用，无法直接删除。是否强制删除？（将先删除这些报告）${hint ? ` ${hint}` : ''}`,
+      );
+      (err as Error & { statusCode?: number }).statusCode = 409;
+      throw err;
+    }
+    const ok = force
+      ? promptsRepo.forceDeletePromptProfileWithRuns(db, id)
+      : promptsRepo.deletePromptProfile(db, id);
+    return { ok, deleted_runs: force ? dep.run_count : 0 };
   });
 
   app.get('/api/test-suites', async () => suitesRepo.listTestSuites(db));

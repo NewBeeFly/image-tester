@@ -56,3 +56,37 @@ export function deletePromptProfile(db: Database.Database, id: number): boolean 
   const info = db.prepare('DELETE FROM prompt_profiles WHERE id = ?').run(id);
   return info.changes > 0;
 }
+
+export type PromptProfileRunDependency = {
+  run_count: number;
+  latest_run_ids: number[];
+};
+
+export function getPromptProfileRunDependency(
+  db: Database.Database,
+  id: number,
+): PromptProfileRunDependency {
+  const row = db
+    .prepare('SELECT COUNT(*) AS cnt FROM test_runs WHERE prompt_profile_id = ?')
+    .get(id) as { cnt: number | bigint };
+  const latest = db
+    .prepare('SELECT id FROM test_runs WHERE prompt_profile_id = ? ORDER BY id DESC LIMIT 5')
+    .all(id) as Array<{ id: number }>;
+  return {
+    run_count: Number(row.cnt ?? 0),
+    latest_run_ids: latest.map((x) => x.id),
+  };
+}
+
+/**
+ * 强制删除提示词模板：先删关联报告（test_runs，连带 test_run_items），再删模板本身。
+ */
+export function forceDeletePromptProfileWithRuns(db: Database.Database, id: number): boolean {
+  const delRuns = db.prepare('DELETE FROM test_runs WHERE prompt_profile_id = ?');
+  const delPrompt = db.prepare('DELETE FROM prompt_profiles WHERE id = ?');
+  const tx = db.transaction(() => {
+    delRuns.run(id);
+    return delPrompt.run(id).changes > 0;
+  });
+  return tx();
+}
