@@ -69,6 +69,8 @@ export interface PromptProfile {
   system_prompt: string;
   user_prompt_template: string;
   notes: string;
+  /** 期望返回值结构（JSON，`{"fields":[...]}`）；运行时自动拼接到 system_prompt */
+  output_schema_json: string;
   created_at: string;
 }
 
@@ -77,6 +79,8 @@ export interface TestSuite {
   name: string;
   image_root: string;
   default_assertions_json: string;
+  /** 测试集级全局文本变量（JSON 对象字符串） */
+  global_variables_json: string;
   created_at: string;
 }
 

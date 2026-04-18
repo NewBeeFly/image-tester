@@ -8,6 +8,22 @@ function ensureDir(filePath: string) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+/**
+ * 若表已存在但缺少字段，则 ALTER TABLE 补齐，避免老库升级后新字段读不到。
+ * SQLite 不支持 `ADD COLUMN IF NOT EXISTS`，需要先查 `PRAGMA table_info` 再判断。
+ */
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  columnDdl: string,
+) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDdl}`);
+  }
+}
+
 export function openDatabase(): Database.Database {
   ensureDir(config.sqlitePath);
   const db = new Database(config.sqlitePath);
@@ -32,6 +48,7 @@ export function openDatabase(): Database.Database {
       system_prompt TEXT NOT NULL DEFAULT '',
       user_prompt_template TEXT NOT NULL,
       notes TEXT NOT NULL DEFAULT '',
+      output_schema_json TEXT NOT NULL DEFAULT '{"fields":[]}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -40,6 +57,7 @@ export function openDatabase(): Database.Database {
       name TEXT NOT NULL,
       image_root TEXT NOT NULL,
       default_assertions_json TEXT NOT NULL DEFAULT '{"rules":[]}',
+      global_variables_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -91,5 +109,19 @@ export function openDatabase(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_run_items_run ON test_run_items(run_id);
   `);
+
+  addColumnIfMissing(
+    db,
+    'prompt_profiles',
+    'output_schema_json',
+    `output_schema_json TEXT NOT NULL DEFAULT '{"fields":[]}'`,
+  );
+  addColumnIfMissing(
+    db,
+    'test_suites',
+    'global_variables_json',
+    `global_variables_json TEXT NOT NULL DEFAULT '{}'`,
+  );
+
   return db;
 }

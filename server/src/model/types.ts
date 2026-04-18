@@ -21,6 +21,11 @@ export interface PromptProfile {
   system_prompt: string;
   user_prompt_template: string;
   notes: string;
+  /**
+   * 期望模型返回的 JSON 字段清单（可视化 Schema）；运行时会被拼到 system_prompt
+   * 末尾或 `{{schema}}` 占位符处，帮助模型稳定产出对应结构。
+   */
+  output_schema_json: string;
   created_at: string;
 }
 
@@ -29,6 +34,11 @@ export interface TestSuite {
   name: string;
   image_root: string;
   default_assertions_json: string;
+  /**
+   * 测试集级全局文本变量（JSON，`{"key":"value"}`）。作为变量合并链最底层，
+   * 可被用例变量 / 清单 / 侧车覆盖；断言的 `equalsSuiteVar` 从这里取期望值。
+   */
+  global_variables_json: string;
   created_at: string;
 }
 
@@ -84,6 +94,8 @@ export type AssertionRule =
       path: string;
       /** 与用例元数据 `variables` 里同名键的字符串值比较（优先级高于 `equals`） */
       equalsCaseVar?: string;
+      /** 与测试集 `global_variables_json` 里同名键的字符串值比较；优先级介于 `equalsCaseVar` 之后、`equals` 之前 */
+      equalsSuiteVar?: string;
       equals?: string;
       inList?: string[];
       regex?: string;
@@ -103,6 +115,29 @@ export type AssertionRule =
 
 export interface AssertionConfig {
   rules: AssertionRule[];
+}
+
+/** 可视化「返回值结构」定义（提示词模板上，用于断言字段选择与自动拼接到系统提示）。 */
+export type OutputFieldType = 'string' | 'number' | 'boolean' | 'array' | 'object' | 'enum';
+
+export interface OutputFieldSchema {
+  /** 字段名（会作为模型返回 JSON 的 key） */
+  name: string;
+  type: OutputFieldType;
+  /** 是否必填（仅作为对模型的提示，不做强校验） */
+  required?: boolean;
+  description?: string;
+  /** type=enum 时的枚举候选值 */
+  enum?: string[];
+}
+
+export interface OutputSchema {
+  fields: OutputFieldSchema[];
+  /**
+   * 自定义提示：在自动拼接的「返回 JSON 结构要求」段落之前/之后追加一段中文，
+   * 例如「只输出 JSON，不要任何解释文字」。留空时走内置默认文案。
+   */
+  instruction?: string;
 }
 
 /** OpenAI 兼容多模态 content 元素 */

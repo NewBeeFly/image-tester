@@ -3,6 +3,8 @@ import { chatVision } from '../provider/index.js';
 import * as providersRepo from '../repository/providersRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import { buildVisionRequestParts } from '../utils/multimodalPrompt.js';
+import { parseSuiteGlobalVariables } from '../utils/caseMetadataMerge.js';
+import { applySchemaToSystemPrompt } from '../utils/outputSchema.js';
 import { resolveUnderRoot } from '../utils/pathSafe.js';
 
 export interface VisionPreviewBody {
@@ -12,6 +14,11 @@ export interface VisionPreviewBody {
   provider_profile_id: number;
   system_prompt?: string;
   user_prompt_template: string;
+  /**
+   * 单图检测页直接提交的可视化输出结构（JSON 原文即 `{"fields":[...]}`）；
+   * 若提供，则在预览时把 schema 拼到 system_prompt。
+   */
+  output_schema_json?: string | null;
   model_override?: string | null;
   /** 有内容则解析为完整 extraParams，忽略档案默认与 params_override_json */
   params_effective_json?: string | null;
@@ -44,12 +51,20 @@ export async function runVisionPreview(db: Database.Database, body: VisionPrevie
   const systemTemplate = body.system_prompt ?? '';
   const userTemplate = body.user_prompt_template;
 
-  const { system, user, variables } = await buildVisionRequestParts(
+  // 单图预览：把测试集全局变量作为兜底，断言在此页不执行；schema 若提供则拼入 system
+  const suiteVars = parseSuiteGlobalVariables(suite.global_variables_json);
+  const systemWithSchema = applySchemaToSystemPrompt(
     systemTemplate,
+    body.output_schema_json ?? '',
+  );
+
+  const { system, user, variables } = await buildVisionRequestParts(
+    systemWithSchema,
     userTemplate,
     metadataJson,
     suite.image_root,
     body.relative_image_path,
+    { globalVariables: suiteVars },
   );
 
   const model = body.model_override?.trim() || provider.default_model;

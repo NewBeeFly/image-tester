@@ -9,6 +9,11 @@ import * as runsRepo from '../repository/runsRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
 import type { AssertionConfig, TestRunItem } from '../model/types.js';
 import { buildVisionRequestParts } from '../utils/multimodalPrompt.js';
+import {
+  parseSuiteGlobalVariables,
+  resolveMergedMetadataJson,
+} from '../utils/caseMetadataMerge.js';
+import { applySchemaToSystemPrompt } from '../utils/outputSchema.js';
 
 export const runEventBus = new EventEmitter();
 runEventBus.setMaxListeners(200);
@@ -153,12 +158,27 @@ async function processRunItem(
   runsRepo.updateRunItem(db, item.id, { status: 'running' });
 
   try {
-    const { system: systemContent, user: userParts, variables } = await buildVisionRequestParts(
+    const suite = suitesRepo.getTestSuite(db, testCase.suite_id)!;
+    const suiteVars = parseSuiteGlobalVariables(suite.global_variables_json);
+    const mergedMetadataJson = resolveMergedMetadataJson(
+      imageRoot,
+      testCase.relative_image_path,
+      testCase.variables_json || '{}',
+      suite.global_variables_json,
+    );
+
+    const systemWithSchema = applySchemaToSystemPrompt(
       prompt.system_prompt,
+      prompt.output_schema_json,
+    );
+
+    const { system: systemContent, user: userParts, variables } = await buildVisionRequestParts(
+      systemWithSchema,
       prompt.user_prompt_template,
       testCase.variables_json || '{}',
       imageRoot,
       testCase.relative_image_path,
+      { globalVariables: suiteVars, mergedMetadataJson },
     );
 
     const model = run.model_override?.trim() || provider.default_model;
@@ -171,13 +191,14 @@ async function processRunItem(
       extraParams,
     });
 
-    const suite = suitesRepo.getTestSuite(db, testCase.suite_id)!;
     const assertionCfg = mergeAssertionConfig(suite.default_assertions_json, testCase.assertions_override_json);
-    const evalResult = await evaluateAssertionConfigAsync(visionResult.text, assertionCfg.rules, variables, {
-      db,
-      runProvider: provider,
-      run,
-    });
+    const evalResult = await evaluateAssertionConfigAsync(
+      visionResult.text,
+      assertionCfg.rules,
+      variables,
+      { db, runProvider: provider, run },
+      suiteVars,
+    );
 
     runsRepo.updateRunItem(db, item.id, {
       status: 'completed',

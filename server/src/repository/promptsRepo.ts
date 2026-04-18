@@ -11,18 +11,25 @@ export function getPromptProfile(db: Database.Database, id: number): PromptProfi
 
 export function insertPromptProfile(
   db: Database.Database,
-  row: { name: string; system_prompt?: string; user_prompt_template: string; notes?: string },
+  row: {
+    name: string;
+    system_prompt?: string;
+    user_prompt_template: string;
+    notes?: string;
+    output_schema_json?: string;
+  },
 ): PromptProfile {
   const info = db
     .prepare(
-      `INSERT INTO prompt_profiles (name, system_prompt, user_prompt_template, notes)
-       VALUES (@name, @system_prompt, @user_prompt_template, @notes)`,
+      `INSERT INTO prompt_profiles (name, system_prompt, user_prompt_template, notes, output_schema_json)
+       VALUES (@name, @system_prompt, @user_prompt_template, @notes, @output_schema_json)`,
     )
     .run({
       name: row.name,
       system_prompt: row.system_prompt ?? '',
       user_prompt_template: row.user_prompt_template,
       notes: row.notes ?? '',
+      output_schema_json: row.output_schema_json ?? '{"fields":[]}',
     });
   return getPromptProfile(db, Number(info.lastInsertRowid))!;
 }
@@ -30,7 +37,12 @@ export function insertPromptProfile(
 export function updatePromptProfile(
   db: Database.Database,
   id: number,
-  patch: Partial<Pick<PromptProfile, 'name' | 'system_prompt' | 'user_prompt_template' | 'notes'>>,
+  patch: Partial<
+    Pick<
+      PromptProfile,
+      'name' | 'system_prompt' | 'user_prompt_template' | 'notes' | 'output_schema_json'
+    >
+  >,
 ): PromptProfile | undefined {
   const cur = getPromptProfile(db, id);
   if (!cur) return undefined;
@@ -40,7 +52,8 @@ export function updatePromptProfile(
       name = @name,
       system_prompt = @system_prompt,
       user_prompt_template = @user_prompt_template,
-      notes = @notes
+      notes = @notes,
+      output_schema_json = @output_schema_json
      WHERE id = @id`,
   ).run({
     id,
@@ -48,6 +61,7 @@ export function updatePromptProfile(
     system_prompt: next.system_prompt,
     user_prompt_template: next.user_prompt_template,
     notes: next.notes,
+    output_schema_json: next.output_schema_json ?? '{"fields":[]}',
   });
   return getPromptProfile(db, id);
 }

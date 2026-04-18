@@ -156,19 +156,41 @@ export function normalizeRoleContent(parts: VisionContentPart[]): string | Visio
   return parts;
 }
 
-/** 从提示词模板 + 用例元数据组装 system/user 消息；user 中至少含一张图 */
+/**
+ * 从提示词模板 + 用例元数据组装 system/user 消息；user 中至少含一张图。
+ *
+ * @param options.globalVariables 测试集全局变量，作为最底层兜底（被用例 variables 覆盖）
+ * @param options.mergedMetadataJson 若调用方已经算过「合并元数据（含清单/侧车）」的 JSON，可直接传入，避免重复解析
+ */
 export async function buildVisionRequestParts(
   systemTemplate: string,
   userTemplate: string,
   metadataJson: string,
   imageRoot: string,
   fallbackRelative: string,
+  options?: {
+    globalVariables?: Record<string, string>;
+    mergedMetadataJson?: string | null;
+  },
 ): Promise<{
   system: string | VisionContentPart[];
   user: VisionContentPart[];
   variables: Record<string, string>;
 }> {
-  const meta = parseCaseMetadataJson(metadataJson);
+  const metaRaw = parseCaseMetadataJson(
+    (options?.mergedMetadataJson && options.mergedMetadataJson.trim())
+      ? options.mergedMetadataJson
+      : metadataJson,
+  );
+  const meta: CaseMetadata = {
+    variables: { ...(options?.globalVariables ?? {}), ...metaRaw.variables },
+    images: { ...metaRaw.images },
+  };
+  // 兜底：若用户模板里使用了 {{img:main}} 但该用例 images 里没显式配置 main，
+  // 自动用该用例的主图相对路径（fallbackRelative）顶上，免去"每个用例都要写一份 images.main"
+  if (!meta.images.main && fallbackRelative?.trim()) {
+    meta.images.main = fallbackRelative.trim();
+  }
   const systemContent = !systemTemplate.trim()
     ? ''
     : normalizeRoleContent(await templateToContentParts(systemTemplate, meta, imageRoot));

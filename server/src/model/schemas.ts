@@ -18,6 +18,11 @@ export const createPromptProfileSchema = z.object({
   system_prompt: z.string().optional(),
   user_prompt_template: z.string().min(1),
   notes: z.string().optional(),
+  /**
+   * 期望返回值结构（字段清单）。格式 `{ "fields": [...], "instruction": "..." }`；
+   * 运行时自动拼到 system_prompt 末尾或 `{{schema}}` 占位符处。
+   */
+  output_schema_json: z.string().optional(),
 });
 
 export const updatePromptProfileSchema = createPromptProfileSchema.partial();
@@ -28,11 +33,14 @@ export const createTestSuiteSchema = z
     /** 托管在「测试集根目录」下的子文件夹名 */
     managed_subdir: z.string().min(1),
     default_assertions_json: z.string().optional(),
+    /** 测试集级全局文本变量（供断言引用与用例兜底） */
+    global_variables_json: z.string().optional(),
   });
 
 export const updateTestSuiteSchema = z.object({
   name: z.string().min(1).optional(),
   default_assertions_json: z.string().optional(),
+  global_variables_json: z.string().optional(),
 });
 
 export const createTestCaseSchema = z.object({
@@ -71,6 +79,8 @@ export const visionPreviewSchema = z.object({
   /** 单图页直接提交，可不经过「提示词模板」表 */
   system_prompt: z.string().optional(),
   user_prompt_template: z.string().min(1),
+  /** 可选：单图检测时直接带入的输出结构 Schema（JSON 原文） */
+  output_schema_json: z.string().nullable().optional(),
   model_override: z.string().nullable().optional(),
   /** 非空时作为本次预览的完整 extraParams，不再与档案默认合并 */
   params_effective_json: z.string().nullable().optional(),

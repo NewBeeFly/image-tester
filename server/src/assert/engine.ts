@@ -30,12 +30,13 @@ export function evaluateAssertionConfig(
   outputText: string,
   rules: AssertionRule[],
   caseVars: Record<string, string>,
+  suiteVars: Record<string, string> = {},
 ): { pass: boolean; results: RuleResult[] } {
   const parsedJson = tryParseJson(outputText);
   const results: RuleResult[] = [];
 
   for (const rule of rules) {
-    const r = evaluateRule(outputText, parsedJson, caseVars, rule);
+    const r = evaluateRule(outputText, parsedJson, caseVars, suiteVars, rule);
     results.push(r);
   }
 
@@ -48,6 +49,7 @@ export async function evaluateAssertionConfigAsync(
   rules: AssertionRule[],
   caseVars: Record<string, string>,
   ctx: LlmJudgeContext,
+  suiteVars: Record<string, string> = {},
 ): Promise<{ pass: boolean; results: RuleResult[] }> {
   const parsedJson = tryParseJson(outputText);
   const results: RuleResult[] = [];
@@ -55,7 +57,7 @@ export async function evaluateAssertionConfigAsync(
     if (rule.type === 'llmJudge') {
       results.push(await evaluateLlmJudgeRule(rule, outputText, caseVars, ctx));
     } else {
-      results.push(evaluateRule(outputText, parsedJson, caseVars, rule));
+      results.push(evaluateRule(outputText, parsedJson, caseVars, suiteVars, rule));
     }
   }
   return { pass: results.every((x) => x.ok), results };
@@ -65,6 +67,7 @@ function evaluateRule(
   outputText: string,
   parsedJson: unknown,
   caseVars: Record<string, string>,
+  suiteVars: Record<string, string>,
   rule: AssertionRule,
 ): RuleResult {
   switch (rule.type) {
@@ -110,6 +113,21 @@ function evaluateRule(
           detail: ok
             ? `字段与用例变量 ${rule.equalsCaseVar} 一致`
             : `字段值为 ${JSON.stringify(value)}，期望等于变量「${rule.equalsCaseVar}」=${JSON.stringify(expected)}`,
+        };
+      }
+      if (rule.equalsSuiteVar != null) {
+        // 向后兼容：老版本的"全局变量比较"。
+        // 新版语义已合并到 equalsCaseVar（测试集只声明变量名，值由用例 variables 提供）。
+        // 这里先查 suiteVars（老数据默认值），找不到再 fallback 到 caseVars（新行为）。
+        const expected =
+          suiteVars[rule.equalsSuiteVar] ?? caseVars[rule.equalsSuiteVar] ?? '';
+        const ok = String(value) === String(expected);
+        return {
+          rule,
+          ok,
+          detail: ok
+            ? `字段与测试集变量 ${rule.equalsSuiteVar} 一致`
+            : `字段值为 ${JSON.stringify(value)}，期望等于测试集变量「${rule.equalsSuiteVar}」=${JSON.stringify(expected)}`,
         };
       }
       if (rule.equals != null) {

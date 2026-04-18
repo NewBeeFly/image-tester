@@ -25,6 +25,12 @@ import {
   type TestSuite,
 } from './api'
 import { PROVIDER_FORM_PRESETS } from './providerPresets'
+import { AssertionBuilder, type SchemaFieldOption } from './components/AssertionBuilder'
+import { CaseAnnotator } from './components/CaseAnnotator'
+import { SchemaBuilder } from './components/SchemaBuilder'
+import { VariableBuilder } from './components/VariableBuilder'
+import { SuiteVarListBuilder, extractSuiteVarNames } from './components/SuiteVarListBuilder'
+import { parseSuiteVariables, safeParseJson } from './components/common'
 
 type Tab = 'providers' | 'prompts' | 'suites' | 'preview' | 'run' | 'report'
 
@@ -192,6 +198,7 @@ export default function App() {
         <SuitesSection
           suites={suites}
           runs={runs}
+          prompts={prompts}
           onChange={() => void refreshAll()}
           onError={setError}
           onGoRun={(suiteId) => {
@@ -449,8 +456,10 @@ function emptyPromptForm() {
   return {
     name: '默认视觉描述',
     system_prompt: '你是严谨的图像理解助手，请用中文简洁回答。',
-    user_prompt_template: '请描述图片中的主要物体，并判断是否包含文字：{{hint}}',
+    // 默认带 {{img:main}}：运行时若用例没显式配 images.main，后端会用该用例主图兜底
+    user_prompt_template: '请识别下图内容，并严格按系统提示的 JSON 结构返回。\n\n{{img:main}}',
     notes: '',
+    output_schema_json: '{"fields":[]}',
   }
 }
 
@@ -474,6 +483,7 @@ function PromptsSection(props: {
       system_prompt: row.system_prompt,
       user_prompt_template: row.user_prompt_template,
       notes: row.notes,
+      output_schema_json: row.output_schema_json || '{"fields":[]}',
     })
   }
 
@@ -540,6 +550,20 @@ function PromptsSection(props: {
         />
       </div>
       <div className="row">
+        <label>返回值结构（Schema）</label>
+        <div style={{ flex: 1 }}>
+          <SchemaBuilder
+            value={form.output_schema_json}
+            systemPrompt={form.system_prompt}
+            onChange={(next) => setForm({ ...form, output_schema_json: next })}
+          />
+          <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            定义后，运行时会自动把"请按此 JSON 结构返回"的说明拼到系统提示末尾；若系统提示中含{' '}
+            <span className="mono">{'{{schema}}'}</span> 占位符则就地替换。字段会在"测试集"默认断言里作为下拉选项出现。
+          </p>
+        </div>
+      </div>
+      <div className="row">
         <label>备注</label>
         <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </div>
@@ -600,20 +624,16 @@ function emptySuiteForm() {
     /** 托管在「测试集根目录」下的子文件夹名 */
     managed_subdir: 'example-suite',
     default_assertions_json: defaultAssertionExample,
+    /** 测试集变量列表：只声明变量名（JSON：{"variables":[{"name":"xxx","description":"yyy"}]}） */
+    global_variables_json: '{}',
   }
 }
 
-function emptyCaseForm() {
-  return {
-    relative_image_path: 'demo/sample.png',
-    variables_json: '{\n  "hint": "如有文字请指出关键词"\n}',
-    assertions_override_json: '',
-  }
-}
 
 function SuitesSection(props: {
   suites: TestSuite[]
   runs: TestRun[]
+  prompts: PromptProfile[]
   onChange: () => void
   onError: (m: string | null) => void
   onGoRun: (suiteId: number) => void
@@ -623,8 +643,6 @@ function SuitesSection(props: {
   const [suiteEditingId, setSuiteEditingId] = useState<number | null>(null)
   const [suiteId, setSuiteId] = useState<number | null>(null)
   const [cases, setCases] = useState<TestCase[]>([])
-  const [caseForm, setCaseForm] = useState(emptyCaseForm)
-  const [caseEditingId, setCaseEditingId] = useState<number | null>(null)
   const [scanDir, setScanDir] = useState('')
   const [scanPaths, setScanPaths] = useState<string[]>([])
   const [selectedScan, setSelectedScan] = useState<Record<string, boolean>>({})
@@ -640,6 +658,10 @@ function SuitesSection(props: {
   const [cleanupTip, setCleanupTip] = useState('')
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorMode, setEditorMode] = useState<'new' | 'edit'>('new')
+  /** 在测试集编辑里选一个提示词模板作为"参考"，其 output_schema 会提供给断言字段下拉 */
+  const [refPromptIdForSuite, setRefPromptIdForSuite] = useState<number | null>(null)
+  /** 大图标注弹窗状态 */
+  const [annotatorCaseId, setAnnotatorCaseId] = useState<number | null>(null)
 
   /** 用例列表「编辑」：弹窗内改单条图片用例 */
   const [caseModal, setCaseModal] = useState<{
@@ -673,6 +695,73 @@ function SuitesSection(props: {
     [props.suites, dataSuiteId],
   )
 
+  /** 选中的「参考提示词模板」的输出 Schema 字段 → 断言下拉候选 */
+  const refSchemaFields = useMemo<SchemaFieldOption[]>(() => {
+    if (refPromptIdForSuite == null) return []
+    const p = props.prompts.find((x) => x.id === refPromptIdForSuite)
+    if (!p) return []
+    const r = safeParseJson<{ fields?: unknown[] }>(p.output_schema_json || '{"fields":[]}')
+    if (!r.ok || !r.value || !Array.isArray(r.value.fields)) return []
+    const out: SchemaFieldOption[] = []
+    for (const raw of r.value.fields as unknown[]) {
+      if (!raw || typeof raw !== 'object') continue
+      const f = raw as Record<string, unknown>
+      const name = typeof f.name === 'string' ? f.name.trim() : ''
+      if (!name) continue
+      out.push({
+        name,
+        type: typeof f.type === 'string' ? f.type : 'string',
+        description: typeof f.description === 'string' ? f.description : undefined,
+        enumValues: Array.isArray(f.enum) ? (f.enum as unknown[]).map((x) => String(x ?? '')) : undefined,
+      })
+    }
+    return out
+  }, [refPromptIdForSuite, props.prompts])
+
+  /** 从用例 variables JSON（分区或扁平）里提取已填变量 key */
+  function extractVariableKeys(raw: string | null | undefined): string[] {
+    const r = safeParseJson<Record<string, unknown>>(raw || '{}')
+    if (!r.ok || !r.value || typeof r.value !== 'object' || Array.isArray(r.value)) return []
+    const o = r.value as Record<string, unknown>
+    if ('variables' in o && o.variables && typeof o.variables === 'object' && !Array.isArray(o.variables)) {
+      return Object.keys(o.variables as Record<string, unknown>)
+    }
+    return Object.keys(parseSuiteVariables(raw || '{}'))
+  }
+
+  /** 合并 [测试集声明] ∪ [用例已填] 的变量名列表，去重。给下拉组件做候选。 */
+  function mergeVarKeys(...lists: string[][]): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const l of lists) {
+      for (const k of l) {
+        if (!k) continue
+        if (seen.has(k)) continue
+        seen.add(k)
+        out.push(k)
+      }
+    }
+    return out
+  }
+
+  /** 当前测试集声明的变量名列表（来自 SuiteVarListBuilder） */
+  const suiteDefinedVarKeys = useMemo(
+    () => extractSuiteVarNames(suiteForm.global_variables_json),
+    [suiteForm.global_variables_json],
+  )
+
+  /** 用例编辑弹窗里的用例变量键（合并测试集声明） */
+  const caseModalVarKeys = useMemo(
+    () => mergeVarKeys(suiteDefinedVarKeys, extractVariableKeys(caseModal.variables_json)),
+    [suiteDefinedVarKeys, caseModal.variables_json],
+  )
+
+  /** 当前打开大图标注弹窗的用例对象 */
+  const annotatorCase = useMemo(
+    () => (annotatorCaseId != null ? cases.find((c) => c.id === annotatorCaseId) ?? null : null),
+    [annotatorCaseId, cases],
+  )
+
   /** 加载服务器 image_root 下子目录列表 */
   const refreshDirOptions = useCallback(async (sid: number) => {
     try {
@@ -696,8 +785,6 @@ function SuitesSection(props: {
       setCases([])
       setUploadDirOptions([])
     }
-    setCaseEditingId(null)
-    setCaseForm(emptyCaseForm())
     setFolderTip('')
     setImgTip('')
     setJsonOverrideTip('')
@@ -718,6 +805,7 @@ function SuitesSection(props: {
       name: s.name,
       managed_subdir: '',
       default_assertions_json: s.default_assertions_json,
+      global_variables_json: s.global_variables_json || '{}',
     })
     props.onError(null)
   }
@@ -756,6 +844,7 @@ function SuitesSection(props: {
 
   async function createSuiteFromForm(): Promise<TestSuite> {
     const default_assertions_json = suiteForm.default_assertions_json || '{"rules":[]}'
+    const global_variables_json = suiteForm.global_variables_json || '{}'
     if (!suiteForm.name.trim()) {
       throw new Error('请填写测试集名称')
     }
@@ -767,6 +856,7 @@ function SuitesSection(props: {
       name: suiteForm.name,
       managed_subdir,
       default_assertions_json,
+      global_variables_json,
     })
   }
 
@@ -780,6 +870,7 @@ function SuitesSection(props: {
       name: row.name,
       managed_subdir: '',
       default_assertions_json: row.default_assertions_json,
+      global_variables_json: row.global_variables_json || '{}',
     })
     props.onChange()
     return row.id
@@ -790,9 +881,11 @@ function SuitesSection(props: {
     try {
       if (suiteEditingId != null) {
         const default_assertions_json = suiteForm.default_assertions_json || '{"rules":[]}'
+        const global_variables_json = suiteForm.global_variables_json || '{}'
         await patchJson(`/api/test-suites/${suiteEditingId}`, {
           name: suiteForm.name,
           default_assertions_json,
+          global_variables_json,
         })
         props.onChange()
         return
@@ -804,16 +897,12 @@ function SuitesSection(props: {
         name: row.name,
         managed_subdir: '',
         default_assertions_json: row.default_assertions_json,
+        global_variables_json: row.global_variables_json || '{}',
       })
       props.onChange()
     } catch (e) {
       props.onError((e as Error).message)
     }
-  }
-
-  function cancelCaseEdit() {
-    setCaseEditingId(null)
-    setCaseForm(emptyCaseForm())
   }
 
   function startEditCase(c: TestCase) {
@@ -848,32 +937,6 @@ function SuitesSection(props: {
       await patchJson(`/api/test-cases/${caseModal.id}`, payload)
       if (dataSuiteId != null) await refreshCases(dataSuiteId)
       closeCaseModal()
-    } catch (e) {
-      props.onError((e as Error).message)
-    }
-  }
-
-  async function saveCase() {
-    if (dataSuiteId == null) {
-      props.onError('请先保存测试集或选择已有测试集')
-      return
-    }
-    props.onError(null)
-    try {
-      const payload = {
-        relative_image_path: caseForm.relative_image_path,
-        variables_json: caseForm.variables_json || '{}',
-        assertions_override_json: caseForm.assertions_override_json.trim()
-          ? caseForm.assertions_override_json
-          : null,
-      }
-      if (caseEditingId != null) {
-        await patchJson(`/api/test-cases/${caseEditingId}`, payload)
-      } else {
-        await postJson(`/api/test-suites/${dataSuiteId}/cases`, payload)
-      }
-      cancelCaseEdit()
-      await refreshCases(dataSuiteId)
     } catch (e) {
       props.onError((e as Error).message)
     }
@@ -1282,11 +1345,39 @@ function SuitesSection(props: {
         </div>
       )}
       <div className="row">
-        <label>默认断言 JSON</label>
-        <textarea
-          value={suiteForm.default_assertions_json}
-          onChange={(e) => setSuiteForm({ ...suiteForm, default_assertions_json: e.target.value })}
-        />
+        <label>测试集变量列表</label>
+        <div style={{ flex: 1 }}>
+          <SuiteVarListBuilder
+            value={suiteForm.global_variables_json}
+            onChange={(next) => setSuiteForm({ ...suiteForm, global_variables_json: next })}
+            leftHint="先在这里声明要用到的变量名；用例编辑/标注时可直接选用，断言里的「引用变量」候选也来自这里。"
+          />
+        </div>
+      </div>
+      <div className="row">
+        <label>参考提示词模板</label>
+        <select
+          value={refPromptIdForSuite ?? ''}
+          onChange={(e) => setRefPromptIdForSuite(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">（不选，断言字段只能手填 jsonPath）</option>
+          {props.prompts.map((p) => (
+            <option key={p.id} value={p.id}>
+              #{p.id} {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="row">
+        <label>默认断言</label>
+        <div style={{ flex: 1 }}>
+          <AssertionBuilder
+            value={suiteForm.default_assertions_json}
+            onChange={(next) => setSuiteForm({ ...suiteForm, default_assertions_json: next })}
+            schemaFields={refSchemaFields}
+            varKeys={suiteDefinedVarKeys}
+          />
+        </div>
       </div>
 
       <h3 className="suiteSectionTitle">导入资源</h3>
@@ -1475,41 +1566,6 @@ function SuitesSection(props: {
             <p className="muted">扫描结果会显示在此处（最多约 500 张）。</p>
           )}
 
-          <h3 className="muted">手动添加单条用例</h3>
-          <div className="row">
-            <label>图片相对路径（相对 image_root）</label>
-            <input
-              value={caseForm.relative_image_path}
-              onChange={(e) => setCaseForm({ ...caseForm, relative_image_path: e.target.value })}
-            />
-          </div>
-          <div className="row">
-            <label>
-              变量 variables_json（直接存储于数据库；运行时使用此值）
-            </label>
-            <textarea
-              value={caseForm.variables_json}
-              onChange={(e) => setCaseForm({ ...caseForm, variables_json: e.target.value })}
-            />
-          </div>
-          <div className="row">
-            <label>用例级断言覆盖（可留空则使用测试集默认）</label>
-            <textarea
-              value={caseForm.assertions_override_json}
-              onChange={(e) => setCaseForm({ ...caseForm, assertions_override_json: e.target.value })}
-            />
-          </div>
-          <div className="actions">
-            <button type="button" className="btn btnPrimary" onClick={() => void saveCase()}>
-              {caseEditingId != null ? '保存用例修改' : '添加用例'}
-            </button>
-            {caseEditingId != null ? (
-              <button type="button" className="btn" onClick={cancelCaseEdit}>
-                取消用例编辑
-              </button>
-            ) : null}
-          </div>
-
           <h3 className="muted">用例列表</h3>
           <div className="tableWrap">
             <table>
@@ -1543,13 +1599,21 @@ function SuitesSection(props: {
                         </button>
                         <button
                           type="button"
+                          className="btn btnGhost"
+                          onClick={() => setAnnotatorCaseId(c.id)}
+                          title="左大图右可视化变量，适合对着图改变量"
+                        >
+                          大图标注
+                        </button>
+                        <button
+                          type="button"
                           className="btn btnDanger"
                           onClick={() =>
                             void (async () => {
                               props.onError(null)
                               try {
                                 await delJson<{ ok: boolean }>(`/api/test-cases/${c.id}`)
-                                await refreshCases(dataSuiteId)
+                                if (dataSuiteId != null) await refreshCases(dataSuiteId)
                               } catch (e) {
                                 props.onError((e as Error).message)
                               }
@@ -1602,22 +1666,29 @@ function SuitesSection(props: {
                 />
               </div>
               <div className="row" style={{ marginBottom: 10 }}>
-                <label>变量 variables_json</label>
-                <textarea
-                  className="modalTextarea"
-                  value={caseModal.variables_json}
-                  onChange={(e) => setCaseModal((m) => ({ ...m, variables_json: e.target.value }))}
-                  spellCheck={false}
-                />
+                <label>变量</label>
+                <div style={{ flex: 1 }}>
+                  <VariableBuilder
+                    value={caseModal.variables_json}
+                    onChange={(next) => setCaseModal((m) => ({ ...m, variables_json: next }))}
+                    knownKeys={suiteDefinedVarKeys}
+                  />
+                </div>
               </div>
               <div className="row" style={{ marginBottom: 0 }}>
                 <label>用例级断言覆盖（可留空）</label>
-                <textarea
-                  className="modalTextarea modalTextarea--small"
-                  value={caseModal.assertions_override_json}
-                  onChange={(e) => setCaseModal((m) => ({ ...m, assertions_override_json: e.target.value }))}
-                  spellCheck={false}
-                />
+                <div style={{ flex: 1 }}>
+                  <AssertionBuilder
+                    value={caseModal.assertions_override_json || '{"rules":[]}'}
+                    onChange={(next) => {
+                      const r = safeParseJson<{ rules?: unknown[] }>(next)
+                      const empty = r.ok && r.value && Array.isArray(r.value.rules) && r.value.rules.length === 0
+                      setCaseModal((m) => ({ ...m, assertions_override_json: empty ? '' : next }))
+                    }}
+                    schemaFields={refSchemaFields}
+                    varKeys={caseModalVarKeys}
+                  />
+                </div>
               </div>
             </div>
             <div className="modalFooter actions">
@@ -1632,6 +1703,33 @@ function SuitesSection(props: {
         </div>
         , document.body)
         : null}
+
+      {annotatorCase && dataSuiteId != null ? (
+        <CaseAnnotator
+          open={annotatorCaseId != null}
+          suiteId={dataSuiteId}
+          testCase={annotatorCase}
+          schemaFields={refSchemaFields}
+          suiteDefinedVarKeys={suiteDefinedVarKeys}
+          onClose={() => setAnnotatorCaseId(null)}
+          onSave={async (payload) => {
+            props.onError(null)
+            try {
+              await patchJson(`/api/test-cases/${annotatorCase.id}`, {
+                relative_image_path: payload.relative_image_path,
+                variables_json: payload.variables_json || '{}',
+                assertions_override_json: payload.assertions_override_json.trim()
+                  ? payload.assertions_override_json
+                  : null,
+              })
+              await refreshCases(dataSuiteId)
+            } catch (e) {
+              props.onError((e as Error).message)
+              throw e
+            }
+          }}
+        />
+      ) : null}
 
     </div>
   )
@@ -1655,6 +1753,8 @@ function PreviewSection(props: {
   const [metadataJson, setMetadataJson] = useState('{\n  "variables": {},\n  "images": {}\n}')
   const [systemPrompt, setSystemPrompt] = useState(PREVIEW_DEFAULT_SYSTEM)
   const [userPrompt, setUserPrompt] = useState(PREVIEW_DEFAULT_USER)
+  /** 当前预览使用的输出结构 Schema（随提示词模板载入；运行时会被拼到 system_prompt） */
+  const [outputSchemaJson, setOutputSchemaJson] = useState<string>('')
   const [templatePickId, setTemplatePickId] = useState<number | ''>('')
   const [providerId, setProviderId] = useState<number | ''>('')
   const [modelOverride, setModelOverride] = useState('')
@@ -1720,6 +1820,8 @@ function PreviewSection(props: {
     props.onError(null)
     setSystemPrompt(t.system_prompt ?? '')
     setUserPrompt(t.user_prompt_template)
+    // 载入模板的结构化输出 Schema，后端会在请求时自动拼到 system_prompt
+    setOutputSchemaJson(t.output_schema_json || '')
   }
 
   const resolveMetadataFromSuite = useCallback(
@@ -1778,6 +1880,8 @@ function PreviewSection(props: {
         provider_profile_id: providerId,
         system_prompt: systemPrompt,
         user_prompt_template: userPrompt,
+        // 把当前载入的输出结构 Schema 也一并提交，后端会应用到 system_prompt 末尾
+        output_schema_json: outputSchemaJson?.trim() ? outputSchemaJson : null,
         model_override: modelOverride.trim() ? modelOverride.trim() : null,
         params_effective_json: pe || null,
         params_override_json: null,
@@ -2091,6 +2195,7 @@ function PreviewSection(props: {
               <div className="previewWbField">
                 <label>系统提示词</label>
                 <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={5} />
+                <OutputSchemaHint raw={outputSchemaJson} onClear={() => setOutputSchemaJson('')} />
               </div>
               <div className="previewWbField">
                 <label>用户提示词</label>
@@ -2100,6 +2205,72 @@ function PreviewSection(props: {
           )}
         </aside>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 单图检测页的输出结构提示：显示当前载入模板的 Schema 字段数与预览，
+ * 让用户一眼看出"结构化输出要求"是否已随请求发送。
+ */
+function OutputSchemaHint(props: { raw: string; onClear: () => void }) {
+  const { raw, onClear } = props
+  const info = useMemo(() => {
+    if (!raw || !raw.trim()) return { empty: true as const }
+    try {
+      const o = JSON.parse(raw) as { fields?: unknown[]; instruction?: unknown }
+      const fields = Array.isArray(o.fields)
+        ? o.fields.filter((f): f is { name: string } =>
+            !!f && typeof f === 'object' && typeof (f as { name?: unknown }).name === 'string' && !!(f as { name: string }).name.trim(),
+          )
+        : []
+      return {
+        empty: false as const,
+        count: fields.length,
+        names: fields.map((f) => f.name),
+        hasInstruction: typeof o.instruction === 'string' && o.instruction.trim().length > 0,
+      }
+    } catch {
+      return { empty: false as const, count: 0, names: [] as string[], hasInstruction: false, parseError: true as const }
+    }
+  }, [raw])
+
+  if (info.empty) {
+    return (
+      <p className="previewWbHint" style={{ marginTop: 4 }}>
+        未载入结构化输出 Schema——模型不会被强制按 JSON 字段返回。在「提示词模板」里选一个含 Schema 的模板即可自动拼到 system_prompt。
+      </p>
+    )
+  }
+  if ('parseError' in info) {
+    return (
+      <p className="previewWbHint" style={{ marginTop: 4, color: '#c0392b' }}>
+        Schema JSON 解析失败；本次请求将不会拼接 Schema。请回到提示词页检查。
+      </p>
+    )
+  }
+  if (info.count === 0 && !info.hasInstruction) {
+    return (
+      <p className="previewWbHint" style={{ marginTop: 4 }}>
+        当前模板的 Schema 为空（没有字段）——等同于未启用结构化输出。
+      </p>
+    )
+  }
+  return (
+    <div className="previewWbHint" style={{ marginTop: 4 }}>
+      <span>
+        已载入 Schema · 字段 {info.count} 个：<span className="mono">{info.names.join(', ') || '(无)'}</span>
+        {info.hasInstruction ? ' · 含 instruction' : ''}。发送时会自动拼到 system_prompt 末尾。
+      </span>
+      <button
+        type="button"
+        className="btn btnGhost"
+        style={{ marginLeft: 8, padding: '0 8px', height: 22, lineHeight: '20px', fontSize: 12 }}
+        onClick={onClear}
+        title="本次预览不携带 Schema"
+      >
+        清除
+      </button>
     </div>
   )
 }

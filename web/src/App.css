@@ -1260,3 +1260,410 @@ select.mono {
   justify-content: flex-end;
   margin: 0;
 }
+
+/* ============================================================
+   可视化编辑器（Schema / Variable / Assertion）共享容器
+   ============================================================ */
+.modeTabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0 8px;
+  flex-wrap: wrap;
+}
+
+.modeTabsLeft,
+.modeTabsRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modeTabBtn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.modeTabBtn:hover {
+  border-color: var(--border-strong, var(--border));
+}
+
+.modeTabBtnActive {
+  background: var(--accent-soft, rgba(56, 189, 248, 0.12));
+  border-color: var(--accent, #38bdf8);
+  color: var(--accent-strong, #0284c7);
+  font-weight: 600;
+}
+
+/* 共享按钮变体 */
+.btnGhost {
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.btnGhost:hover:not(:disabled) {
+  background: var(--panel-2, rgba(148, 163, 184, 0.08));
+}
+
+/* ===== VariableBuilder ===== */
+.vb,
+.sb,
+.ab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vbVisual {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vbSection {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel);
+}
+
+.vbSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kvList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kvRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(180px, 2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.kvRow--head {
+  padding: 0 2px;
+}
+
+.vbKnownKeys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  background: rgba(120, 140, 180, 0.06);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.vbKnownKeyChip {
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kvKey,
+.kvVal {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  min-width: 0;
+}
+
+/* ===== SchemaBuilder ===== */
+.sbVisual {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sbInstruction {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sbInstructionInput {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+}
+
+.sbFieldsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sbFields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sbField {
+  display: grid;
+  grid-template-columns: 140px 140px auto minmax(160px, 1fr) 180px auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.sbField > input,
+.sbField > select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.sbFieldReq {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  white-space: nowrap;
+}
+
+.sbFieldEnum {
+  grid-column: 2 / span 4;
+}
+
+.sbPreview {
+  margin-top: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.sbPreview summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.sbPreviewBlock {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--panel-2, rgba(148, 163, 184, 0.08));
+  border-radius: 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===== AssertionBuilder ===== */
+.abVisual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.abRules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.abRuleRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(140px, 0.9fr) minmax(220px, 1.5fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.abRuleRow--head {
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+}
+
+.abRuleRow--advanced {
+  grid-template-columns: auto 1fr auto;
+  background: var(--panel-2, rgba(148, 163, 184, 0.06));
+}
+
+.abAdvBadge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #b45309;
+  white-space: nowrap;
+}
+
+.abAdvBody {
+  margin: 0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.abCell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.abInput {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
+  height: 28px;
+  flex: 1 1 80px;
+}
+
+.abInput--slim {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 80px;
+  max-width: 150px;
+  font-size: 12px;
+}
+
+.abInput--mt {
+  margin-top: 2px;
+  flex-basis: 100%;
+}
+
+select.abInput {
+  padding-right: 18px;
+}
+
+.abFieldFixed {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.abCi {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  white-space: nowrap;
+}
+
+.abRuleRemove {
+  padding: 4px 8px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.abActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* ===== CaseAnnotator 大图标注弹窗 ===== */
+.modalDialog--annotator {
+  max-width: min(1280px, 96vw);
+  width: min(1280px, 96vw);
+  max-height: min(92vh, 900px);
+}
+
+.annotatorBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.annotatorImage {
+  background: #0f172a;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.annotatorImage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #0f172a;
+}
+
+.annotatorForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+.annotatorCard {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.annotatorCard h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+@media (max-width: 960px) {
+  .annotatorBody {
+    grid-template-columns: 1fr;
+  }
+
+  .annotatorImage {
+    max-height: 40vh;
+  }
+}

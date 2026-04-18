@@ -116,6 +116,8 @@ cd server && npm run init-db:dev
 
 **用户消息里必须至少有一张图**：要么模板中出现 `{{img:…}}` 且元数据里配有路径，要么模板中**不出现**任何 `{{img:}}`，此时自动使用用例的 **主图**（`relative_image_path`）。系统提示词里也可插入 `{{img:}}`（若模型 / 网关支持 system 多模段）。
 
+**`main` 自动别名**：用例 `images` 里若**没有** `main` 这个键，后端会把它**自动指向该用例的主图** `relative_image_path`。因此**无需**在每个用例里手写 `"images": {"main": "xxx.jpg"}`，模板里直接写 `{{img:main}}` 就能工作；只有当你确实要显式换一张图时才在该用例里手动配 `main`。新建提示词模板的默认用户模板已经带了 `{{img:main}}`。
+
 门店招牌 + `storeName` 断言的可复制示例见 [`examples/`](examples/)（用例 `variables_json` 与测试集默认断言各一份）。
 
 ### 数据流：DB 优先，JSON 仅在导入/覆盖时使用
@@ -149,6 +151,66 @@ cd server && npm run init-db:dev
 **图片不要当纯文本拼进 prompt**：模型收到的是「一条用户消息里多段 content」——文本段 + `type: image_url` 的图片段（后端读本地图转 `data:image/...;base64,...`）。把路径或 base64 写进字符串里，多数网关不会当图片识别；应使用 `{{img:别名}}` + 元数据 `images`，或留空 `{{img:}}` 走主图自动附图。
 
 **单图检测页**：左侧选 Provider、可直接编辑 **系统 / 用户提示词**；**请求参数 JSON** 会带入当前 Provider 档案里的默认参数（与 Provider 设置页一致），可改且**仅影响本次预览**；也可清空该框以完全使用档案默认值。`POST /api/vision/preview` 若带 **`params_effective_json`**（非空），则整段解析为扩展请求参数；否则仍按档案默认与可选的 `params_override_json` 合并。右侧**必须先选测试集**，选图下拉合并 **已入库用例** 与 **`image_root` 下磁盘扫描**。主图路径须相对 `image_root`。
+
+## 可视化编辑：输出 Schema / 测试集变量 / 断言 / 大图标注
+
+这一部分面向**非研发**同学，把原先只能写 JSON 的三个东西做成了图形界面，JSON 原文仍随时可切换。
+
+### 输出 Schema（绑在「提示词模板」上）
+
+在「提示词模板」编辑页新增 **`output_schema_json`** 字段与 `SchemaBuilder` 可视化编辑器：
+
+- 用字段列表定义你希望模型返回的 JSON 结构：字段名 / 类型（string, number, integer, boolean, array, object）/ 是否必填 / 描述 / 可选的 `enum`（枚举值列表）。
+- 保存后，**运行批量任务** 与 **单图预览** 都会自动把这份 Schema 渲染成一段「请按下列 JSON 结构返回」的指令拼接到系统提示词里：
+  - 系统提示词里出现 **`{{schema}}`** 占位符 → 替换为生成的说明；
+  - 没有占位符 → 自动追加到系统提示词末尾。
+- 为空 Schema 不会注入任何文本。
+- 这些字段名（`$.storeName`、`$.ok` 等）会同步出现在断言编辑器里，可直接选，不必再手写 JSONPath。
+
+### 测试集变量列表（绑在「测试集」上）
+
+在「测试集」编辑页用 **`SuiteVarListBuilder`** 可视化编辑。字段含义只有两个：
+
+- `name`：变量名（英文键，建议用驼峰），会作为用例变量的下拉候选和断言里「引用变量」的候选；
+- `description`：说明文字（可选，仅给看的人参考），**不参与运行**。
+
+JSON 形态：`{"variables":[{"name":"storeName","description":"门店名"}, ...]}`。
+
+运行时变量合并链（从低优先级到高，**后者覆盖前者**）：
+
+用例编辑 / 大图标注中的变量编辑器会用这里声明的变量名提供**下拉候选**与**「快速添加」一键按钮**；用户仍可手写新 key。
+
+运行时变量的合并顺序（从低到高）：
+
+1. 用例 `variables_json`（数据库里直接存的那份）
+2. `image_root` 根清单 `image-tester-metadata.json` / `metadata.json`（如仍在用）
+3. 子目录同名清单
+4. 与主图同名的 **侧车 JSON**
+
+> 注：测试集变量列表自身**不再贡献变量值**（只是声明）。历史老数据里若 `global_variables_json` 以 `{k:v}` 形式存了值，仍会作为最底层 fallback 读到；新的声明格式 `{variables:[...]}` 不写值。
+
+### 可视化断言（测试集默认 / 用例级覆盖）
+
+`AssertionBuilder` 把 `{ rules: [...] }` 渲染成可视化规则列表：
+
+- **字段来源**：整段输出文本（`contains`/`regex`）、Schema 字段（自动生成 `$.xxx`）、手写 JSONPath。
+- **操作符**：按字段类型自动过滤（例如 boolean 不出现「字段数值等于」）。
+- **期望值来源**：`常量` / `引用变量`。「引用变量」= 在当前用例合并后的 `variables` 里按名取值；候选由测试集变量列表 + 当前用例已填变量 合并得到，可从下拉选也可手输。
+- 老版 `equalsSuiteVar` 在读入时会被当作 `equalsCaseVar` 展示并保存；后端对老 `equalsSuiteVar` 字段仍做 fallback，保证历史规则不中断。
+- `customScript` 和 `llmJudge` 是**高级规则**，在可视化列表里以只读 JSON 卡片展示，可删除；编辑请切到「JSON 原文」标签页。
+
+测试集编辑页顶部可选「参考提示词模板」，选中后 `AssertionBuilder` 的字段下拉会用该模板的 Schema 字段（方便共享同一断言但不同提示词）。
+
+### 大图标注模式
+
+在「测试集与用例」页的用例列表里，每行新增 **「大图标注」** 按钮，打开的宽对话框里：
+
+- 左侧大图（黑灰背景，便于看招牌 / 价签 / 文字细节）；
+- 右侧两张卡片，分别是 `VariableBuilder`（该用例变量）与 `AssertionBuilder`（该用例断言覆盖）；
+- 两个编辑器都内建「可视化 / JSON 原文」切换，顶栏有「格式化 JSON」按钮；
+- 保存会 `PATCH /api/test-cases/:id`，覆盖该用例的 `variables_json` 与 `assertions_override_json`（清空断言列表则回落到测试集默认）。
+
+适合「对着图反复调变量 / 断言」的场景。按 Esc 或点遮罩可关闭。
 
 ## 测试集根目录（共用托管目录）
 
@@ -196,6 +258,11 @@ cd server && npm run init-db:dev
       "equalsCaseVar": "storeName"
     },
     {
+      "type": "jsonPath",
+      "path": "$.storeName",
+      "equalsSuiteVar": "defaultStoreName"
+    },
+    {
       "type": "customScript",
       "expression": "outputText.length > 10 && (!parsedJson || parsedJson.ok === true)"
     },
@@ -217,7 +284,8 @@ cd server && npm run init-db:dev
 **jsonPath**：使用 [JSONPath Plus](https://github.com/JSONPath-Plus/JSONPath-Plus) 语法。
 
 - **`equals`**：与固定字符串比较（`String(取值) === equals`）。
-- **`equalsCaseVar`**：与当前用例 **合并后的 `variables`（含 `image-tester-metadata.json`、侧车 JSON、再用例 `variables_json`）** 中同名键的值比较（均为字符串化后比较）。例如模型输出 `{"storeName":"东南王村…"}`，期望来自侧车或清单里的 `storeName`，可写 `"path": "$.storeName", "equalsCaseVar": "storeName"`。若同时写 `equalsCaseVar` 与 `equals`，**优先使用 `equalsCaseVar`**。
+- **`equalsCaseVar`**：与当前用例 **合并后的 `variables`（用例 `variables_json` + 清单 + 侧车 JSON 合并结果）** 中同名键的值比较（均为字符串化后比较）。例如模型输出 `{"storeName":"东南王村…"}`，期望来自侧车或清单里的 `storeName`，可写 `"path": "$.storeName", "equalsCaseVar": "storeName"`。若同时写 `equalsCaseVar` 与 `equals`，**优先使用 `equalsCaseVar`**。
+- **`equalsSuiteVar`**（已废弃语义，保留向后兼容）：历史上比较的是测试集 `global_variables_json` 里的值；新结构（`{variables:[...]}`）不再贡献值，此时引擎会 fallback 到当前用例合并后的 `variables[key]`，等价于 `equalsCaseVar`。优先级仍为 `equalsSuiteVar` > `equalsCaseVar` > `equals`。
 
 **模型原始响应与断言用的文本**：接口完整 JSON（含 `choices`、`usage` 等）存在运行结果的 **`raw_response_json`**。参与断言、并写入 **`model_output`** 的字符串是 **`choices[0].message.content` 原文**（即助手最终回复；若为 JSON 字符串可直接被 `jsonPath` 解析）。带深度思考时，`reasoning_content` **不会**再拼进 `model_output`，避免前面一大段推理导致无法 `JSON.parse`；推理内容仍在原始响应的 `message` 里可查。
 

@@ -38,6 +38,69 @@ import {
 import { resolveUnderRoot } from '../utils/pathSafe.js';
 import { parseOrThrow } from '../utils/zodParse.js';
 
+/**
+ * 校验「测试集全局变量」JSON：必须是扁平 `{k: string|number|boolean}` 结构；
+ * 允许空串（等同 `{}`）。失败抛 400。
+ */
+function validateGlobalVariablesJson(raw: string | undefined | null): void {
+  if (raw == null || raw === '') return;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    const err = new Error('测试集变量列表 JSON 无法解析：请确认是合法 JSON 对象');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    const err = new Error(
+      '测试集变量列表必须是对象，如 {"variables":[{"name":"storeName","description":"门店名"}]}',
+    );
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  const o = data as Record<string, unknown>;
+  if ('variables' in o && Array.isArray(o.variables)) {
+    for (const item of o.variables) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        const err = new Error('variables 每一项必须是对象，例如 {"name":"storeName"}');
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        throw err;
+      }
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.name !== 'string' || !rec.name.trim()) {
+        const err = new Error('variables 中每一项必须包含非空 name 字段');
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        throw err;
+      }
+    }
+  }
+}
+
+/** 轻校验「输出结构 Schema」JSON：必须是对象且 fields 是数组（字段细节由解析器宽容处理）。 */
+function validateOutputSchemaJson(raw: string | undefined | null): void {
+  if (raw == null || raw === '') return;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    const err = new Error('输出结构 Schema JSON 无法解析');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    const err = new Error('输出结构 Schema 必须是对象，形如 {"fields":[...]}');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  const fields = (data as { fields?: unknown }).fields;
+  if (fields != null && !Array.isArray(fields)) {
+    const err = new Error('输出结构 Schema.fields 必须是数组');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+}
+
 /** 托管在 testSuiteParentDir 下的子目录名（禁止路径分隔符等） */
 function sanitizeManagedSubdir(raw: string): string {
   const s = raw
@@ -113,12 +176,14 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
 
   app.post('/api/prompt-profiles', async (req) => {
     const body = parseOrThrow(createPromptProfileSchema, req.body);
+    validateOutputSchemaJson(body.output_schema_json);
     return promptsRepo.insertPromptProfile(db, body);
   });
 
   app.patch('/api/prompt-profiles/:id', async (req) => {
     const id = Number((req.params as { id: string }).id);
     const body = parseOrThrow(updatePromptProfileSchema, req.body);
+    validateOutputSchemaJson(body.output_schema_json);
     const updated = promptsRepo.updatePromptProfile(db, id, body);
     if (!updated) {
       const err = new Error('提示词配置不存在');
@@ -156,6 +221,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     if (body.default_assertions_json) {
       parseAssertionConfig(body.default_assertions_json);
     }
+    validateGlobalVariablesJson(body.global_variables_json);
     let imageRoot: string;
     try {
       const sub = sanitizeManagedSubdir(body.managed_subdir);
@@ -169,6 +235,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       name: body.name,
       image_root: imageRoot,
       default_assertions_json: body.default_assertions_json,
+      global_variables_json: body.global_variables_json,
     });
     invalidateCaseMetadataManifestCache();
     return row;
@@ -180,6 +247,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     if (body.default_assertions_json) {
       parseAssertionConfig(body.default_assertions_json);
     }
+    validateGlobalVariablesJson(body.global_variables_json);
     const updated = suitesRepo.updateTestSuite(db, id, body);
     if (!updated) {
       const err = new Error('测试集不存在');
@@ -229,6 +297,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       suite.image_root,
       body.relative_image_path,
       body.variables_json?.trim() || '{}',
+      suite.global_variables_json,
     );
     return { metadata_json };
   });
@@ -331,7 +400,9 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       db,
       suiteId,
       toAdd.map((p) => {
-        const meta = resolveMergedCaseMetadata(suite.image_root, p, '{}');
+        // 导入用例时不把测试集全局变量写进 variables_json（避免冗余 & 污染 case 数据），
+        // 仅参考清单/侧车的用例级键值；全局变量会在运行/预览时动态合并。
+        const meta = resolveMergedCaseMetadata(suite.image_root, p, '{}', '{}');
         const hasData =
           Object.keys(meta.variables ?? {}).length > 0 || Object.keys(meta.images ?? {}).length > 0;
         return {

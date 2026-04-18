@@ -132,23 +132,63 @@ function manifestMapForDir(absDir: string): Map<string, CaseMetadata> {
   return map;
 }
 
+/** 将测试集 `global_variables_json` 解析为纯字符串键值对（非字符串值会转字符串） */
+/**
+ * 解析测试集变量定义 JSON，返回「可作为变量值使用」的键值映射。
+ *
+ * 历史上存在两种形态，均兼容：
+ * 1) 老「全局变量值」：`{ storeName: "示例" }` 或 `{ variables: { storeName: "示例" } }`
+ *    —— 视作最底层 fallback 变量值（历史行为）。
+ * 2) 新「仅声明」（`{ variables: [{name, description}] }`）：只是变量名 + 说明，**不作为值**；
+ *    返回空对象，真正的值由用例 `variables_json` 提供。
+ */
+export function parseSuiteGlobalVariables(raw: string | null | undefined): Record<string, string> {
+  if (!raw || !raw.trim()) return {};
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  const o = data as Record<string, unknown>;
+  // 新声明格式：variables 是数组 → 仅声明，无值
+  if ('variables' in o && Array.isArray(o.variables)) return {};
+  // 兼容「分区字典格式」：{ variables: {...} } 取出内层
+  const src =
+    'variables' in o && o.variables && typeof o.variables === 'object' && !Array.isArray(o.variables)
+      ? (o.variables as Record<string, unknown>)
+      : o;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (v == null) continue;
+    if (typeof v === 'object') continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+
 /**
  * 合并元数据（用于导入写库与断言里的 caseVars）：
- * 1. 数据库里的 `variables_json` 作**基底**
- * 2. `image_root/` 根清单（key 为完整相对路径，如 `subdir/image.jpg`）**覆盖**同名键
- * 3. 图片所在子目录的清单（key 为裸文件名，如 `image.jpg`）**再覆盖**
+ * 1. **测试集全局变量**（`global_variables_json`）作最底层基底（最低优先）
+ * 2. 数据库里的 `variables_json` 覆盖
+ * 3. `image_root/` 根清单（key 为完整相对路径，如 `subdir/image.jpg`）**覆盖**同名键
+ * 4. 图片所在子目录的清单（key 为裸文件名，如 `image.jpg`）**再覆盖**
  *    ——这样整文件夹上传后，子目录里的 metadata.json 也能被解析到
- * 4. 与主图同名的侧车 `.json`**最高优先**（sidecar > 子目录清单 > 根清单 > 库值）
+ * 5. 与主图同名的侧车 `.json`**最高优先**（sidecar > 子目录清单 > 根清单 > 库值 > 全局）
  */
 export function resolveMergedCaseMetadata(
   imageRoot: string,
   relativeImagePath: string,
   dbOrUiVariablesJson: string,
+  suiteGlobalVarsJson: string | null | undefined = '{}',
 ): CaseMetadata {
   const rel = posix(relativeImagePath).replace(/^\/+/, '');
   const absRoot = path.resolve(imageRoot);
 
-  let merged = parseCaseMetadataJson(dbOrUiVariablesJson);
+  const baseVars = parseSuiteGlobalVariables(suiteGlobalVarsJson ?? '{}');
+  let merged: CaseMetadata = { variables: { ...baseVars }, images: {} };
+  merged = mergeMeta(merged, parseCaseMetadataJson(dbOrUiVariablesJson));
 
   // 1. 根清单：用完整相对路径匹配
   const rootManifest = manifestMapForDir(absRoot);
@@ -188,6 +228,14 @@ export function resolveMergedMetadataJson(
   imageRoot: string,
   relativeImagePath: string,
   dbOrUiVariablesJson: string,
+  suiteGlobalVarsJson: string | null | undefined = '{}',
 ): string {
-  return JSON.stringify(resolveMergedCaseMetadata(imageRoot, relativeImagePath, dbOrUiVariablesJson));
+  return JSON.stringify(
+    resolveMergedCaseMetadata(
+      imageRoot,
+      relativeImagePath,
+      dbOrUiVariablesJson,
+      suiteGlobalVarsJson,
+    ),
+  );
 }

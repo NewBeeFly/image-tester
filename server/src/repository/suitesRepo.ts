@@ -11,17 +11,23 @@ export function getTestSuite(db: Database.Database, id: number): TestSuite | und
 
 export function insertTestSuite(
   db: Database.Database,
-  row: { name: string; image_root: string; default_assertions_json?: string },
+  row: {
+    name: string;
+    image_root: string;
+    default_assertions_json?: string;
+    global_variables_json?: string;
+  },
 ): TestSuite {
   const info = db
     .prepare(
-      `INSERT INTO test_suites (name, image_root, default_assertions_json)
-       VALUES (@name, @image_root, @default_assertions_json)`,
+      `INSERT INTO test_suites (name, image_root, default_assertions_json, global_variables_json)
+       VALUES (@name, @image_root, @default_assertions_json, @global_variables_json)`,
     )
     .run({
       name: row.name,
       image_root: row.image_root,
       default_assertions_json: row.default_assertions_json ?? '{"rules":[]}',
+      global_variables_json: row.global_variables_json ?? '{}',
     });
   return getTestSuite(db, Number(info.lastInsertRowid))!;
 }
@@ -29,7 +35,12 @@ export function insertTestSuite(
 export function updateTestSuite(
   db: Database.Database,
   id: number,
-  patch: Partial<Pick<TestSuite, 'name' | 'image_root' | 'default_assertions_json'>>,
+  patch: Partial<
+    Pick<
+      TestSuite,
+      'name' | 'image_root' | 'default_assertions_json' | 'global_variables_json'
+    >
+  >,
 ): TestSuite | undefined {
   const cur = getTestSuite(db, id);
   if (!cur) return undefined;
@@ -38,13 +49,15 @@ export function updateTestSuite(
     `UPDATE test_suites SET
       name = @name,
       image_root = @image_root,
-      default_assertions_json = @default_assertions_json
+      default_assertions_json = @default_assertions_json,
+      global_variables_json = @global_variables_json
      WHERE id = @id`,
   ).run({
     id,
     name: next.name,
     image_root: next.image_root,
     default_assertions_json: next.default_assertions_json,
+    global_variables_json: next.global_variables_json ?? '{}',
   });
   return getTestSuite(db, id);
 }
