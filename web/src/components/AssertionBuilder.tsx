@@ -55,6 +55,7 @@ type VisualOp =
   | 'fieldEmpty'
   | 'fieldArrayContainsAll'
   | 'fieldArrayEquals'
+  | 'fieldArrayUnorderedEquals'
 
 const OP_LABEL: Record<VisualOp, string> = {
   contains: '整段包含',
@@ -67,7 +68,8 @@ const OP_LABEL: Record<VisualOp, string> = {
   fieldExists: '存在且非空',
   fieldEmpty: '为空或不存在',
   fieldArrayContainsAll: '全部包含',
-  fieldArrayEquals: '数组相等',
+  fieldArrayEquals: '数组相等（顺序一致）',
+  fieldArrayUnorderedEquals: '数组相等（忽略顺序）',
 }
 
 const TEXT_OPS: VisualOp[] = ['contains', 'notContains', 'regex']
@@ -94,7 +96,7 @@ function allowedOps(sourceKind: SourceKind, fieldType?: string): VisualOp[] {
     case 'boolean':
       return ['fieldEquals', 'fieldExists', 'fieldEmpty']
     case 'array':
-      return ['fieldExists', 'fieldEmpty', 'fieldArrayContainsAll', 'fieldArrayEquals']
+      return ['fieldExists', 'fieldEmpty', 'fieldArrayContainsAll', 'fieldArrayEquals', 'fieldArrayUnorderedEquals']
     case 'object':
       return ['fieldExists', 'fieldEmpty']
     default:
@@ -262,6 +264,28 @@ function toEditor(raw: unknown): EditorRule {
         },
       }
     }
+    if (r.arrayUnorderedEqualsCaseVar != null) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayUnorderedEquals',
+          expectedSource: 'var',
+          expectedText: String(r.arrayUnorderedEqualsCaseVar),
+        },
+      }
+    }
+    if (Array.isArray(r.arrayUnorderedEqualsConst)) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayUnorderedEquals',
+          expectedSource: 'const',
+          expectedText: JSON.stringify(r.arrayUnorderedEqualsConst),
+        },
+      }
+    }
     return { kind: 'visual', data: { ...base, op: 'fieldExists' } }
   }
   return { kind: 'unknown', raw }
@@ -324,6 +348,12 @@ function visualToJsonRule(v: VisualRule): Record<string, unknown> | null {
       const base: Record<string, unknown> = { type: 'jsonPath', path }
       if (v.expectedSource === 'var') base.arrayEqualsCaseVar = v.expectedText.trim()
       else base.arrayEqualsConst = parseConstArrayInput(v.expectedText)
+      return base
+    }
+    case 'fieldArrayUnorderedEquals': {
+      const base: Record<string, unknown> = { type: 'jsonPath', path }
+      if (v.expectedSource === 'var') base.arrayUnorderedEqualsCaseVar = v.expectedText.trim()
+      else base.arrayUnorderedEqualsConst = parseConstArrayInput(v.expectedText)
       return base
     }
     default: {
@@ -639,10 +669,12 @@ function renderExpected(
   if (op === 'fieldExists' || op === 'fieldEmpty') {
     return <span className="abFieldFixed muted">（无需期望值）</span>
   }
-  if (op === 'fieldArrayContainsAll' || op === 'fieldArrayEquals') {
+  if (op === 'fieldArrayContainsAll' || op === 'fieldArrayEquals' || op === 'fieldArrayUnorderedEquals') {
     const ph =
       op === 'fieldArrayContainsAll'
         ? '常量：JSON 数组如 ["猪","牛"]，或英文逗号分隔'
+        : op === 'fieldArrayUnorderedEquals'
+        ? '常量：JSON 数组（忽略顺序比较）'
         : '常量：JSON 数组（顺序与模型输出逐项比较）'
     const kindSelect = (
       <select
@@ -826,23 +858,4 @@ function renderExpected(
       ) : null}
     </>
   )
-}
-
-/** 合并提示词 Schema 与测试集变量声明：同名时以测试集的 type / enum（预置项）为准。
- * 测试集变量只用于覆盖同名字段，不追加为新的字段选项（字段只来自 Schema）。 */
-export function mergeSchemaWithSuiteVarFields(
-  schemaFields: SchemaFieldOption[],
-  suiteVarFields: SchemaFieldOption[],
-): SchemaFieldOption[] {
-  const suiteByName = new Map(suiteVarFields.map((f) => [f.name, f]))
-  return schemaFields.map((f) => {
-    const s = suiteByName.get(f.name)
-    if (!s) return { ...f }
-    return {
-      ...f,
-      type: s.type,
-      description: s.description || f.description,
-      enumValues: s.enumValues?.length ? s.enumValues : f.enumValues,
-    }
-  })
 }

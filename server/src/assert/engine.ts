@@ -44,6 +44,18 @@ function deepEqualAssertion(a: unknown, b: unknown): boolean {
   return false;
 }
 
+/** 判断两个数组是否相等（忽略顺序，逐项 deep 比较） */
+function arrayEqualsIgnoreOrder(a: unknown[], b: unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  const bRemaining = [...b];
+  for (const item of a) {
+    const idx = bRemaining.findIndex((bi) => deepEqualAssertion(item, bi));
+    if (idx === -1) return false;
+    bRemaining.splice(idx, 1);
+  }
+  return bRemaining.length === 0;
+}
+
 /** 从用例 variables 字符串值解析 JSON 数组（用于数组类断言） */
 function parseCaseVarJsonArray(
   caseVars: Record<string, string>,
@@ -213,6 +225,27 @@ function evaluateRule(
           detail: ok
             ? '数组相等（逐项顺序一致）'
             : `数组不相等：实际 ${JSON.stringify(value)}，期望 ${JSON.stringify(expected)}`,
+        };
+      }
+      if (rule.arrayUnorderedEqualsCaseVar != null || rule.arrayUnorderedEqualsConst != null) {
+        if (!Array.isArray(value)) {
+          return { rule, ok: false, detail: `路径取值不是数组，无法做「无序数组相等」校验（实际为 ${JSON.stringify(value)}）` };
+        }
+        let expected: unknown[];
+        if (rule.arrayUnorderedEqualsCaseVar != null) {
+          const parsed = parseCaseVarJsonArray(caseVars, suiteVars, rule.arrayUnorderedEqualsCaseVar);
+          if (!parsed.ok) return { rule, ok: false, detail: parsed.detail };
+          expected = parsed.arr;
+        } else {
+          expected = rule.arrayUnorderedEqualsConst ?? [];
+        }
+        const ok = arrayEqualsIgnoreOrder(value, expected);
+        return {
+          rule,
+          ok,
+          detail: ok
+            ? '无序数组相等校验通过'
+            : `无序数组不相等：实际 ${JSON.stringify(value)}，期望 ${JSON.stringify(expected)}`,
         };
       }
       if (rule.arrayContainsAllCaseVar != null || rule.arrayContainsAll != null) {

@@ -58,6 +58,7 @@ export function openDatabase(): Database.Database {
       image_root TEXT NOT NULL,
       default_assertions_json TEXT NOT NULL DEFAULT '{"rules":[]}',
       global_variables_json TEXT NOT NULL DEFAULT '{}',
+      ref_prompt_id INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -121,6 +122,12 @@ export function openDatabase(): Database.Database {
     'test_suites',
     'global_variables_json',
     `global_variables_json TEXT NOT NULL DEFAULT '{}'`,
+  );
+  addColumnIfMissing(
+    db,
+    'test_suites',
+    'ref_prompt_id',
+    'ref_prompt_id INTEGER',
   );
 
   return db;

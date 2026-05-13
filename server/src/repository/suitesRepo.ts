@@ -16,18 +16,20 @@ export function insertTestSuite(
     image_root: string;
     default_assertions_json?: string;
     global_variables_json?: string;
+    ref_prompt_id?: number | null;
   },
 ): TestSuite {
   const info = db
     .prepare(
-      `INSERT INTO test_suites (name, image_root, default_assertions_json, global_variables_json)
-       VALUES (@name, @image_root, @default_assertions_json, @global_variables_json)`,
+      `INSERT INTO test_suites (name, image_root, default_assertions_json, global_variables_json, ref_prompt_id)
+       VALUES (@name, @image_root, @default_assertions_json, @global_variables_json, @ref_prompt_id)`,
     )
     .run({
       name: row.name,
       image_root: row.image_root,
       default_assertions_json: row.default_assertions_json ?? '{"rules":[]}',
       global_variables_json: row.global_variables_json ?? '{}',
+      ref_prompt_id: row.ref_prompt_id ?? null,
     });
   return getTestSuite(db, Number(info.lastInsertRowid))!;
 }
@@ -38,7 +40,7 @@ export function updateTestSuite(
   patch: Partial<
     Pick<
       TestSuite,
-      'name' | 'image_root' | 'default_assertions_json' | 'global_variables_json'
+      'name' | 'image_root' | 'default_assertions_json' | 'global_variables_json' | 'ref_prompt_id'
     >
   >,
 ): TestSuite | undefined {
@@ -50,7 +52,8 @@ export function updateTestSuite(
       name = @name,
       image_root = @image_root,
       default_assertions_json = @default_assertions_json,
-      global_variables_json = @global_variables_json
+      global_variables_json = @global_variables_json,
+      ref_prompt_id = @ref_prompt_id
      WHERE id = @id`,
   ).run({
     id,
@@ -58,6 +61,7 @@ export function updateTestSuite(
     image_root: next.image_root,
     default_assertions_json: next.default_assertions_json,
     global_variables_json: next.global_variables_json ?? '{}',
+    ref_prompt_id: next.ref_prompt_id ?? null,
   });
   return getTestSuite(db, id);
 }

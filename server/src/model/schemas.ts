@@ -35,12 +35,15 @@ export const createTestSuiteSchema = z
     default_assertions_json: z.string().optional(),
     /** 测试集级全局文本变量（供断言引用与用例兜底） */
     global_variables_json: z.string().optional(),
+    /** 参考的提示词模板 ID */
+    ref_prompt_id: z.number().int().nullable().optional(),
   });
 
 export const updateTestSuiteSchema = z.object({
   name: z.string().min(1).optional(),
   default_assertions_json: z.string().optional(),
   global_variables_json: z.string().optional(),
+  ref_prompt_id: z.number().int().nullable().optional(),
 });
 
 export const createTestCaseSchema = z.object({

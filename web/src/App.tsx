@@ -25,7 +25,7 @@ import {
   type TestSuite,
 } from './api'
 import { PROVIDER_FORM_PRESETS } from './providerPresets'
-import { AssertionBuilder, mergeSchemaWithSuiteVarFields, type SchemaFieldOption } from './components/AssertionBuilder'
+import { AssertionBuilder, type SchemaFieldOption } from './components/AssertionBuilder'
 import { CaseAnnotator } from './components/CaseAnnotator'
 import { SchemaBuilder } from './components/SchemaBuilder'
 import { VariableBuilder } from './components/VariableBuilder'
@@ -626,6 +626,7 @@ function emptySuiteForm() {
     default_assertions_json: defaultAssertionExample,
     /** 测试集变量列表：只声明变量名（JSON：{"variables":[{"name":"xxx","description":"yyy"}]}） */
     global_variables_json: '{}',
+    ref_prompt_id: null as number | null,
   }
 }
 
@@ -744,17 +745,71 @@ function SuitesSection(props: {
     return out
   }
 
+  /** 根据测试集变量声明，构建带默认值的 JSON */
+  function buildDefaultVariablesJson(
+    suiteDefinedVarKeys: string[],
+    suiteVarHints: Record<string, { type: string; enum?: string[] }>,
+  ): Record<string, unknown> {
+    const defaults: Record<string, unknown> = {}
+    for (const key of suiteDefinedVarKeys) {
+      const hint = suiteVarHints[key]
+      if (!hint) {
+        defaults[key] = ''
+      } else if (hint.type === 'boolean') {
+        defaults[key] = 'false'
+      } else if (hint.type === 'array') {
+        defaults[key] = '[]'
+      } else {
+        defaults[key] = ''
+      }
+    }
+    return defaults
+  }
+
+  /**
+   * 将测试集默认值合并进用例变量 JSON。
+   * 逻辑：如果用例变量中没有某个测试集声明的变量，则补充默认值；保留用例已有值。
+   */
+  function mergeVariablesJson(caseJson: string, suiteDefaults: Record<string, unknown>): string {
+    try {
+      const parsed = JSON.parse(caseJson || '{}') as Record<string, unknown>
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return JSON.stringify(suiteDefaults)
+      }
+
+      const hasPartition = 'variables' in parsed || 'images' in parsed
+      if (hasPartition) {
+        const variables = (parsed.variables ?? {}) as Record<string, unknown>
+        const mergedVars: Record<string, unknown> = { ...variables }
+        for (const [k, v] of Object.entries(suiteDefaults)) {
+          if (!(k in mergedVars) || mergedVars[k] === '') {
+            mergedVars[k] = v
+          }
+        }
+        const result = { ...parsed, variables: mergedVars }
+        return JSON.stringify(result, null, 2)
+      } else {
+        const merged: Record<string, unknown> = { ...suiteDefaults }
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v !== '' && v != null) {
+            merged[k] = v
+          }
+        }
+        return JSON.stringify({ variables: merged }, null, 2)
+      }
+    } catch {
+      return JSON.stringify(suiteDefaults, null, 2)
+    }
+  }
+
   /** 当前测试集声明的变量名列表（来自 SuiteVarListBuilder） */
   const suiteDefinedVarKeys = useMemo(
     () => extractSuiteVarNames(suiteForm.global_variables_json),
     [suiteForm.global_variables_json],
   )
 
-  /** 默认断言 / 用例断言里「字段」下拉：Schema 字段 ∪ 测试集声明，同名以测试集类型为准 */
-  const mergedAssertionFieldOptions = useMemo(
-    () => mergeSchemaWithSuiteVarFields(refSchemaFields, extractSuiteVarFields(suiteForm.global_variables_json)),
-    [refSchemaFields, suiteForm.global_variables_json],
-  )
+  /** 断言编辑器「字段」下拉：只来自提示词模板的输出 Schema */
+  const assertionFieldOptions = refSchemaFields
 
   const suiteVarValueHints = useMemo(
     () => extractSuiteVarValueHints(suiteForm.global_variables_json),
@@ -812,12 +867,15 @@ function SuitesSection(props: {
   function loadSuiteIntoForm(s: TestSuite) {
     setSuiteEditingId(s.id)
     setSuiteId(s.id)
-    setSuiteForm({
+    const form: ReturnType<typeof emptySuiteForm> = {
       name: s.name,
       managed_subdir: '',
       default_assertions_json: s.default_assertions_json,
       global_variables_json: s.global_variables_json || '{}',
-    })
+      ref_prompt_id: (s as { ref_prompt_id?: number | null }).ref_prompt_id ?? null,
+    }
+    setSuiteForm(form)
+    setRefPromptIdForSuite(form.ref_prompt_id)
     props.onError(null)
   }
 
@@ -868,6 +926,7 @@ function SuitesSection(props: {
       managed_subdir,
       default_assertions_json,
       global_variables_json,
+      ref_prompt_id: suiteForm.ref_prompt_id,
     })
   }
 
@@ -882,6 +941,7 @@ function SuitesSection(props: {
       managed_subdir: '',
       default_assertions_json: row.default_assertions_json,
       global_variables_json: row.global_variables_json || '{}',
+      ref_prompt_id: (row as { ref_prompt_id?: number | null }).ref_prompt_id ?? null,
     })
     props.onChange()
     return row.id
@@ -897,6 +957,7 @@ function SuitesSection(props: {
           name: suiteForm.name,
           default_assertions_json,
           global_variables_json,
+          ref_prompt_id: suiteForm.ref_prompt_id,
         })
         props.onChange()
         return
@@ -917,9 +978,11 @@ function SuitesSection(props: {
   }
 
   function startEditCase(c: TestCase) {
-    const rawVars = c.variables_json || '{}'
-    let pretty = rawVars
-    try { pretty = JSON.stringify(JSON.parse(rawVars) as object, null, 2) } catch { /* keep raw */ }
+    // 合并测试集默认值 + 用例已有变量
+    const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarValueHints)
+    const mergedVars = mergeVariablesJson(c.variables_json || '{}', suiteDefaults)
+    let pretty = mergedVars
+    try { pretty = JSON.stringify(JSON.parse(mergedVars) as object, null, 2) } catch { /* keep merged */ }
     setCaseModal({
       open: true,
       id: c.id,
@@ -938,9 +1001,12 @@ function SuitesSection(props: {
     if (caseModal.id == null) return
     props.onError(null)
     try {
+      // 保存前检查：如果用例变量缺少测试集声明的变量，自动补充默认值
+      const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarValueHints)
+      const mergedVars = mergeVariablesJson(caseModal.variables_json || '{}', suiteDefaults)
       const payload = {
         relative_image_path: caseModal.relative_image_path,
-        variables_json: caseModal.variables_json || '{}',
+        variables_json: mergedVars || '{}',
         assertions_override_json: caseModal.assertions_override_json.trim()
           ? caseModal.assertions_override_json
           : null,
@@ -1369,7 +1435,11 @@ function SuitesSection(props: {
         <label>参考提示词模板</label>
         <select
           value={refPromptIdForSuite ?? ''}
-          onChange={(e) => setRefPromptIdForSuite(e.target.value ? Number(e.target.value) : null)}
+          onChange={(e) => {
+            const newId = e.target.value ? Number(e.target.value) : null
+            setRefPromptIdForSuite(newId)
+            setSuiteForm((f) => ({ ...f, ref_prompt_id: newId }))
+          }}
         >
           <option value="">（不选，断言字段只能手填 jsonPath）</option>
           {props.prompts.map((p) => (
@@ -1385,7 +1455,7 @@ function SuitesSection(props: {
           <AssertionBuilder
             value={suiteForm.default_assertions_json}
             onChange={(next) => setSuiteForm({ ...suiteForm, default_assertions_json: next })}
-            schemaFields={mergedAssertionFieldOptions}
+            schemaFields={assertionFieldOptions}
             varKeys={suiteDefinedVarKeys}
           />
         </div>
@@ -1697,7 +1767,7 @@ function SuitesSection(props: {
                       const empty = r.ok && r.value && Array.isArray(r.value.rules) && r.value.rules.length === 0
                       setCaseModal((m) => ({ ...m, assertions_override_json: empty ? '' : next }))
                     }}
-                    schemaFields={mergedAssertionFieldOptions}
+                    schemaFields={assertionFieldOptions}
                     varKeys={caseModalVarKeys}
                   />
                 </div>
@@ -1721,7 +1791,7 @@ function SuitesSection(props: {
           open={annotatorCaseId != null}
           suiteId={dataSuiteId}
           testCase={annotatorCase}
-          schemaFields={mergedAssertionFieldOptions}
+          schemaFields={assertionFieldOptions}
           suiteDefinedVarKeys={suiteDefinedVarKeys}
           suiteVarHints={suiteVarValueHints}
           onClose={() => setAnnotatorCaseId(null)}

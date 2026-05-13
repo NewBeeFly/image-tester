@@ -33,18 +33,21 @@ export function CaseAnnotator(props: {
 }) {
   const { open, suiteId, testCase, schemaFields, suiteDefinedVarKeys, suiteVarHints, onClose, onSave } = props
   const [relativePath, setRelativePath] = useState(testCase.relative_image_path)
-  const [variablesJson, setVariablesJson] = useState(testCase.variables_json || '{}')
+  const [variablesJson, setVariablesJson] = useState('')
   const [assertionsJson, setAssertionsJson] = useState(testCase.assertions_override_json ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 初始化：当弹窗打开时，合并测试集默认值 + 用例已有变量
   useEffect(() => {
     if (!open) return
     setRelativePath(testCase.relative_image_path)
-    setVariablesJson(testCase.variables_json || '{}')
     setAssertionsJson(testCase.assertions_override_json ?? '')
     setError(null)
-  }, [open, testCase.id, testCase.relative_image_path, testCase.variables_json, testCase.assertions_override_json])
+    const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarHints)
+    const merged = mergeVariablesJson(testCase.variables_json || '{}', suiteDefaults)
+    setVariablesJson(merged)
+  }, [open, testCase.id])
 
   useEffect(() => {
     if (!open) return
@@ -61,9 +64,12 @@ export function CaseAnnotator(props: {
     setSaving(true)
     setError(null)
     try {
+      // 保存前检查：如果用例变量缺少测试集声明的变量，自动补充默认值
+      const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarHints)
+      const merged = mergeVariablesJson(variablesJson, suiteDefaults)
       await onSave({
         relative_image_path: relativePath,
-        variables_json: variablesJson || '{}',
+        variables_json: merged || '{}',
         assertions_override_json: assertionsJson,
       })
       onClose()
@@ -183,5 +189,62 @@ function extractCaseVarKeys(raw: string): string[] {
     return keys
   } catch {
     return []
+  }
+}
+
+/** 根据测试集变量声明，构建带默认值的 JSON */
+function buildDefaultVariablesJson(
+  suiteDefinedVarKeys: string[],
+  suiteVarHints: Record<string, { type: string; enum?: string[] }>,
+): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {}
+  for (const key of suiteDefinedVarKeys) {
+    const hint = suiteVarHints[key]
+    if (!hint) {
+      defaults[key] = ''
+    } else if (hint.type === 'boolean') {
+      defaults[key] = 'false'
+    } else if (hint.type === 'array') {
+      defaults[key] = '[]'
+    } else {
+      defaults[key] = ''
+    }
+  }
+  return defaults
+}
+
+/**
+ * 将测试集默认值合并进用例变量 JSON。
+ * 逻辑：如果用例变量中没有某个测试集声明的变量，则补充默认值；保留用例已有值。
+ */
+function mergeVariablesJson(caseJson: string, suiteDefaults: Record<string, unknown>): string {
+  try {
+    const parsed = JSON.parse(caseJson || '{}') as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return JSON.stringify(suiteDefaults)
+    }
+
+    const hasPartition = 'variables' in parsed || 'images' in parsed
+    if (hasPartition) {
+      const variables = (parsed.variables ?? {}) as Record<string, unknown>
+      const mergedVars: Record<string, unknown> = { ...variables }
+      for (const [k, v] of Object.entries(suiteDefaults)) {
+        if (!(k in mergedVars) || mergedVars[k] === '') {
+          mergedVars[k] = v
+        }
+      }
+      const result = { ...parsed, variables: mergedVars }
+      return JSON.stringify(result, null, 2)
+    } else {
+      const merged = { ...suiteDefaults }
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v !== '' && v != null) {
+          merged[k] = v
+        }
+      }
+      return JSON.stringify({ variables: merged }, null, 2)
+    }
+  } catch {
+    return JSON.stringify(suiteDefaults, null, 2)
   }
 }

@@ -236,6 +236,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       image_root: imageRoot,
       default_assertions_json: body.default_assertions_json,
       global_variables_json: body.global_variables_json,
+      ref_prompt_id: body.ref_prompt_id ?? null,
     });
     invalidateCaseMetadataManifestCache();
     return row;

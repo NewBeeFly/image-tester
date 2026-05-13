@@ -39,6 +39,8 @@ export interface TestSuite {
    * 可被用例变量 / 清单 / 侧车覆盖；断言的 `equalsSuiteVar` 从这里取期望值。
    */
   global_variables_json: string;
+  /** 参考的提示词模板 ID，用于获取 output_schema 提供断言字段下拉候选 */
+  ref_prompt_id: number | null;
   created_at: string;
 }
 
@@ -108,6 +110,10 @@ export type AssertionRule =
       arrayEqualsConst?: unknown[];
       /** 同上，期望值来自 variables 中同名键的 JSON 数组字符串 */
       arrayEqualsCaseVar?: string;
+      /** 路径取值与常量数组逐项比较，忽略顺序 */
+      arrayUnorderedEqualsConst?: unknown[];
+      /** 同上，期望值来自 variables 中同名键的 JSON 数组字符串 */
+      arrayUnorderedEqualsCaseVar?: string;
     }
   | { type: 'customScript'; expression: string }
   | {

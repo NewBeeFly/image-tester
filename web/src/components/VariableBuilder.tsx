@@ -19,14 +19,14 @@ import { ModeTabs } from './ModeTabs'
  */
 
 export interface CaseMetadataJson {
-  variables?: Record<string, string>
-  images?: Record<string, string>
+  variables?: Record<string, string | string[]>
+  images?: Record<string, string | string[]>
 }
 
 interface Row {
   id: string
   k: string
-  v: string
+  v: string | string[]
 }
 
 let idSeed = 0
@@ -53,18 +53,28 @@ function parseToRows(raw: string): Sections {
     const v = (o.variables ?? {}) as Record<string, unknown>
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       for (const [k, val] of Object.entries(v)) {
-        vars.push({ id: makeId(), k, v: val == null ? '' : String(val) })
+        if (Array.isArray(val)) {
+          vars.push({ id: makeId(), k, v: val.map(String) })
+        } else {
+          vars.push({ id: makeId(), k, v: val == null ? '' : String(val) })
+        }
       }
     }
     const i = (o.images ?? {}) as Record<string, unknown>
     if (i && typeof i === 'object' && !Array.isArray(i)) {
       for (const [k, val] of Object.entries(i)) {
-        imgs.push({ id: makeId(), k, v: val == null ? '' : String(val) })
+        if (Array.isArray(val)) {
+          imgs.push({ id: makeId(), k, v: val.map(String) })
+        } else {
+          imgs.push({ id: makeId(), k, v: val == null ? '' : String(val) })
+        }
       }
     }
   } else {
     for (const [k, val] of Object.entries(o)) {
-      if (val != null && typeof val !== 'object') {
+      if (Array.isArray(val)) {
+        vars.push({ id: makeId(), k, v: val.map(String) })
+      } else if (val != null && typeof val !== 'object') {
         vars.push({ id: makeId(), k, v: String(val) })
       }
     }
@@ -73,21 +83,21 @@ function parseToRows(raw: string): Sections {
 }
 
 function rowsToJson(variables: Row[], images: Row[]): string {
-  const vObj: Record<string, string> = {}
+  const vObj: Record<string, unknown> = {}
   for (const { k, v } of variables) {
     const kk = k.trim()
     if (!kk) continue
-    vObj[kk] = v
+    vObj[kk] = Array.isArray(v) ? v.map(String) : v
   }
-  const iObj: Record<string, string> = {}
+  const iObj: Record<string, unknown> = {}
   for (const { k, v } of images) {
     const kk = k.trim()
     if (!kk) continue
-    iObj[kk] = v
+    iObj[kk] = Array.isArray(v) ? v.map(String) : v
   }
   const payload: CaseMetadataJson = {}
-  if (Object.keys(vObj).length) payload.variables = vObj
-  if (Object.keys(iObj).length) payload.images = iObj
+  if (Object.keys(vObj).length) payload.variables = vObj as Record<string, string>
+  if (Object.keys(iObj).length) payload.images = iObj as Record<string, string>
   return JSON.stringify(payload, null, 2) || '{}'
 }
 
@@ -210,13 +220,15 @@ export function VariableBuilder(props: {
   )
 }
 
-function tryParseStringArray(s: string): string[] | null {
-  const t = s.trim()
+function tryParseStringArray(v: string | string[] | null): string[] | null {
+  if (v === null || v === undefined) return null
+  if (Array.isArray(v)) return v.map(String)
+  const t = v.trim()
   if (!t) return []
   try {
-    const v = JSON.parse(t) as unknown
-    if (!Array.isArray(v)) return null
-    return v.map((x) => String(x ?? ''))
+    const parsed = JSON.parse(t) as unknown
+    if (!Array.isArray(parsed)) return null
+    return parsed.map((x) => String(x ?? ''))
   } catch {
     return null
   }
@@ -311,7 +323,7 @@ function KvListEditor(props: {
                           className="btn btnGhost"
                           style={{ padding: '1px 6px', fontSize: 11 }}
                           onClick={() => {
-                            setAt(r.id, { v: JSON.stringify([...enumPick]) })
+                            setAt(r.id, { v: [...enumPick] })
                           }}
                         >
                           全选
@@ -320,7 +332,7 @@ function KvListEditor(props: {
                           type="button"
                           className="btn btnGhost"
                           style={{ padding: '1px 6px', fontSize: 11 }}
-                          onClick={() => setAt(r.id, { v: JSON.stringify([]) })}
+                          onClick={() => setAt(r.id, { v: [] })}
                         >
                           清空
                         </button>
@@ -341,7 +353,7 @@ function KvListEditor(props: {
                                 if (e.target.checked) set.add(opt)
                                 else set.delete(opt)
                                 const ordered = enumPick.filter((x) => set.has(x))
-                                setAt(r.id, { v: JSON.stringify(ordered) })
+                                setAt(r.id, { v: ordered })
                               }}
                             />
                             <span>{opt}</span>
@@ -351,18 +363,42 @@ function KvListEditor(props: {
                     </div>
                     <input
                       className="kvVal mono"
-                      value={r.v}
+                      value={Array.isArray(r.v) ? JSON.stringify(r.v) : r.v}
                       placeholder={valuePlaceholder}
                       spellCheck={false}
-                      onChange={(e) => setAt(r.id, { v: e.target.value })}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim()
+                        if (raw.startsWith('[')) {
+                          try {
+                            const parsed = JSON.parse(raw)
+                            if (Array.isArray(parsed)) {
+                              setAt(r.id, { v: parsed.map(String) })
+                              return
+                            }
+                          } catch { /* fall through */ }
+                        }
+                        setAt(r.id, { v: raw })
+                      }}
                     />
                   </div>
                 ) : (
                   <input
                     className="kvVal"
-                    value={r.v}
+                    value={Array.isArray(r.v) ? JSON.stringify(r.v) : r.v}
                     placeholder={valuePlaceholder}
-                    onChange={(e) => setAt(r.id, { v: e.target.value })}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim()
+                      if (raw.startsWith('[')) {
+                        try {
+                          const parsed = JSON.parse(raw)
+                          if (Array.isArray(parsed)) {
+                            setAt(r.id, { v: parsed.map(String) })
+                            return
+                          }
+                        } catch { /* fall through */ }
+                      }
+                      setAt(r.id, { v: raw })
+                    }}
                   />
                 )}
                 <button type="button" className="btn btnGhost" onClick={() => remove(r.id)}>
