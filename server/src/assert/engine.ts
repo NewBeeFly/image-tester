@@ -26,6 +26,45 @@ function applyJsonPath(path: string, data: unknown): unknown {
   return res;
 }
 
+function deepEqualAssertion(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => deepEqualAssertion(v, b[i]));
+  }
+  if (typeof a === 'object' && typeof b === 'object') {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 从用例 variables 字符串值解析 JSON 数组（用于数组类断言） */
+function parseCaseVarJsonArray(
+  caseVars: Record<string, string>,
+  suiteVars: Record<string, string>,
+  varName: string,
+): { ok: true; arr: unknown[] } | { ok: false; detail: string } {
+  const raw = caseVars[varName] ?? suiteVars[varName] ?? '';
+  if (raw === undefined || String(raw).trim() === '') {
+    return { ok: false, detail: `变量「${varName}」为空` };
+  }
+  try {
+    const v = JSON.parse(String(raw).trim()) as unknown;
+    if (!Array.isArray(v)) {
+      return { ok: false, detail: `变量「${varName}」解析后不是 JSON 数组` };
+    }
+    return { ok: true, arr: v };
+  } catch {
+    return { ok: false, detail: `变量「${varName}」不是合法 JSON 数组` };
+  }
+}
+
 export function evaluateAssertionConfig(
   outputText: string,
   rules: AssertionRule[],
@@ -154,6 +193,52 @@ function evaluateRule(
         const num = Number(value);
         const ok = Number.isFinite(num) && num === rule.numericEquals;
         return { rule, ok, detail: ok ? '数值相等' : `期望数值 ${rule.numericEquals}，实际 ${String(value)}` };
+      }
+      if (rule.arrayEqualsCaseVar != null || rule.arrayEqualsConst != null) {
+        if (!Array.isArray(value)) {
+          return { rule, ok: false, detail: `路径取值不是数组，无法做「数组相等」校验（实际为 ${JSON.stringify(value)}）` };
+        }
+        let expected: unknown[];
+        if (rule.arrayEqualsCaseVar != null) {
+          const parsed = parseCaseVarJsonArray(caseVars, suiteVars, rule.arrayEqualsCaseVar);
+          if (!parsed.ok) return { rule, ok: false, detail: parsed.detail };
+          expected = parsed.arr;
+        } else {
+          expected = rule.arrayEqualsConst ?? [];
+        }
+        const ok = deepEqualAssertion(value, expected);
+        return {
+          rule,
+          ok,
+          detail: ok
+            ? '数组相等（逐项顺序一致）'
+            : `数组不相等：实际 ${JSON.stringify(value)}，期望 ${JSON.stringify(expected)}`,
+        };
+      }
+      if (rule.arrayContainsAllCaseVar != null || rule.arrayContainsAll != null) {
+        if (!Array.isArray(value)) {
+          return { rule, ok: false, detail: `路径取值不是数组，无法做「全部包含」校验（实际为 ${JSON.stringify(value)}）` };
+        }
+        let required: unknown[];
+        if (rule.arrayContainsAllCaseVar != null) {
+          const parsed = parseCaseVarJsonArray(caseVars, suiteVars, rule.arrayContainsAllCaseVar);
+          if (!parsed.ok) return { rule, ok: false, detail: parsed.detail };
+          required = parsed.arr;
+        } else {
+          required = rule.arrayContainsAll ?? [];
+        }
+        if (required.length === 0) {
+          return { rule, ok: true, detail: '「全部包含」期望集合为空，视为通过' };
+        }
+        const missing = required.filter((item) => !value.some((av) => deepEqualAssertion(av, item)));
+        const ok = missing.length === 0;
+        return {
+          rule,
+          ok,
+          detail: ok
+            ? '数组全部包含校验通过'
+            : `缺少期望项：${JSON.stringify(missing)}；实际数组为 ${JSON.stringify(value)}`,
+        };
       }
       const ok = value !== undefined && value !== null && value !== '';
       return { rule, ok, detail: ok ? '路径存在且非空' : '路径不存在或为空' };

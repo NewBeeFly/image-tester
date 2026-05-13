@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { imageUrl, type TestCase } from '../api'
 import { AssertionBuilder, type SchemaFieldOption } from './AssertionBuilder'
 import { VariableBuilder } from './VariableBuilder'
+import type { SuiteVarValueHint } from './SuiteVarListBuilder'
 
 /**
  * 大图标注弹窗：左大图、右可视化表单。
@@ -21,6 +22,8 @@ export function CaseAnnotator(props: {
   schemaFields: SchemaFieldOption[]
   /** 测试集声明的变量名列表，供变量编辑下拉候选 & 断言"引用变量"候选 */
   suiteDefinedVarKeys: string[]
+  /** 测试集变量类型与 array 枚举，供变量值多选 */
+  suiteVarHints: Record<string, SuiteVarValueHint>
   onClose: () => void
   onSave: (payload: {
     relative_image_path: string
@@ -28,7 +31,7 @@ export function CaseAnnotator(props: {
     assertions_override_json: string
   }) => Promise<void> | void
 }) {
-  const { open, suiteId, testCase, schemaFields, suiteDefinedVarKeys, onClose, onSave } = props
+  const { open, suiteId, testCase, schemaFields, suiteDefinedVarKeys, suiteVarHints, onClose, onSave } = props
   const [relativePath, setRelativePath] = useState(testCase.relative_image_path)
   const [variablesJson, setVariablesJson] = useState(testCase.variables_json || '{}')
   const [assertionsJson, setAssertionsJson] = useState(testCase.assertions_override_json ?? '')
@@ -106,6 +109,7 @@ export function CaseAnnotator(props: {
                 value={variablesJson}
                 onChange={setVariablesJson}
                 knownKeys={suiteDefinedVarKeys}
+                suiteVarHints={suiteVarHints}
               />
             </section>
 

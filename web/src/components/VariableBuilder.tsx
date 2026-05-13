@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import type { SuiteVarValueHint } from './SuiteVarListBuilder'
 import type { EditorMode } from './common'
 import { prettifyJson, safeParseJson } from './common'
 import { ModeTabs } from './ModeTabs'
@@ -102,8 +103,10 @@ export function VariableBuilder(props: {
    * 并提供"按测试集变量补全"快捷按钮。
    */
   knownKeys?: string[]
+  /** 测试集声明的 array 枚举等，用于可视化多选 */
+  suiteVarHints?: Record<string, SuiteVarValueHint>
 }) {
-  const { value, onChange, hideImages, leftHint, knownKeys } = props
+  const { value, onChange, hideImages, leftHint, knownKeys, suiteVarHints } = props
   const [mode, setMode] = useState<EditorMode>('visual')
   const [visual, setVisual] = useState<Sections>(() => parseToRows(value || '{}'))
   const [rawJson, setRawJson] = useState(value || '{}')
@@ -189,6 +192,7 @@ export function VariableBuilder(props: {
             rows={visual.variables}
             onChange={setVariablesRows}
             knownKeys={knownKeys}
+            suiteVarHints={suiteVarHints}
           />
           {!hideImages ? (
             <KvListEditor
@@ -206,6 +210,18 @@ export function VariableBuilder(props: {
   )
 }
 
+function tryParseStringArray(s: string): string[] | null {
+  const t = s.trim()
+  if (!t) return []
+  try {
+    const v = JSON.parse(t) as unknown
+    if (!Array.isArray(v)) return null
+    return v.map((x) => String(x ?? ''))
+  } catch {
+    return null
+  }
+}
+
 function KvListEditor(props: {
   title: string
   hint?: string
@@ -215,8 +231,9 @@ function KvListEditor(props: {
   onChange: (next: Row[]) => void
   /** 可选：预置变量名下拉候选；提供时 key 输入变 combobox */
   knownKeys?: string[]
+  suiteVarHints?: Record<string, SuiteVarValueHint>
 }) {
-  const { title, hint, rows, onChange, keyPlaceholder, valuePlaceholder, knownKeys } = props
+  const { title, hint, rows, onChange, keyPlaceholder, valuePlaceholder, knownKeys, suiteVarHints } = props
   const listId = useId()
   function setAt(id: string, patch: Partial<Row>) {
     onChange(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))
@@ -268,26 +285,92 @@ function KvListEditor(props: {
         <p className="muted" style={{ fontSize: 12 }}>（空）</p>
       ) : (
         <div className="kvList">
-          {rows.map((r) => (
-            <div className="kvRow" key={r.id}>
-              <input
-                className="kvKey"
-                value={r.k}
-                placeholder={keyPlaceholder}
-                list={hasKnown ? listId : undefined}
-                onChange={(e) => setAt(r.id, { k: e.target.value })}
-              />
-              <input
-                className="kvVal"
-                value={r.v}
-                placeholder={valuePlaceholder}
-                onChange={(e) => setAt(r.id, { v: e.target.value })}
-              />
-              <button type="button" className="btn btnGhost" onClick={() => remove(r.id)}>
-                删
-              </button>
-            </div>
-          ))}
+          {rows.map((r) => {
+            const keyTrim = r.k.trim()
+            const hint = keyTrim && suiteVarHints ? suiteVarHints[keyTrim] : undefined
+            const enumPick =
+              hint?.type === 'array' && hint.enum && hint.enum.length > 0 ? hint.enum : null
+            return (
+              <div className="kvRow" key={r.id}>
+                <input
+                  className="kvKey"
+                  value={r.k}
+                  placeholder={keyPlaceholder}
+                  list={hasKnown ? listId : undefined}
+                  onChange={(e) => setAt(r.id, { k: e.target.value })}
+                />
+                {enumPick ? (
+                  <div className="vbVarValueCell">
+                    <div className="vbArrayEnumBar">
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        从测试集枚举多选（生成 JSON）
+                      </span>
+                      <span className="vbArrayEnumQuick">
+                        <button
+                          type="button"
+                          className="btn btnGhost"
+                          style={{ padding: '1px 6px', fontSize: 11 }}
+                          onClick={() => {
+                            setAt(r.id, { v: JSON.stringify([...enumPick]) })
+                          }}
+                        >
+                          全选
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btnGhost"
+                          style={{ padding: '1px 6px', fontSize: 11 }}
+                          onClick={() => setAt(r.id, { v: JSON.stringify([]) })}
+                        >
+                          清空
+                        </button>
+                      </span>
+                    </div>
+                    <div className="vbArrayEnumChecks">
+                      {enumPick.map((opt) => {
+                        const parsed = tryParseStringArray(r.v)
+                        const checked = parsed !== null && parsed.includes(opt)
+                        return (
+                          <label key={opt} className="vbArrayEnumLbl">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const cur = tryParseStringArray(r.v) ?? []
+                                const set = new Set(cur)
+                                if (e.target.checked) set.add(opt)
+                                else set.delete(opt)
+                                const ordered = enumPick.filter((x) => set.has(x))
+                                setAt(r.id, { v: JSON.stringify(ordered) })
+                              }}
+                            />
+                            <span>{opt}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <input
+                      className="kvVal mono"
+                      value={r.v}
+                      placeholder={valuePlaceholder}
+                      spellCheck={false}
+                      onChange={(e) => setAt(r.id, { v: e.target.value })}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    className="kvVal"
+                    value={r.v}
+                    placeholder={valuePlaceholder}
+                    onChange={(e) => setAt(r.id, { v: e.target.value })}
+                  />
+                )}
+                <button type="button" className="btn btnGhost" onClick={() => remove(r.id)}>
+                  删
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

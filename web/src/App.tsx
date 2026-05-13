@@ -25,11 +25,11 @@ import {
   type TestSuite,
 } from './api'
 import { PROVIDER_FORM_PRESETS } from './providerPresets'
-import { AssertionBuilder, type SchemaFieldOption } from './components/AssertionBuilder'
+import { AssertionBuilder, mergeSchemaWithSuiteVarFields, type SchemaFieldOption } from './components/AssertionBuilder'
 import { CaseAnnotator } from './components/CaseAnnotator'
 import { SchemaBuilder } from './components/SchemaBuilder'
 import { VariableBuilder } from './components/VariableBuilder'
-import { SuiteVarListBuilder, extractSuiteVarNames } from './components/SuiteVarListBuilder'
+import { SuiteVarListBuilder, extractSuiteVarFields, extractSuiteVarNames, extractSuiteVarValueHints } from './components/SuiteVarListBuilder'
 import { parseSuiteVariables, safeParseJson } from './components/common'
 
 type Tab = 'providers' | 'prompts' | 'suites' | 'preview' | 'run' | 'report'
@@ -750,6 +750,17 @@ function SuitesSection(props: {
     [suiteForm.global_variables_json],
   )
 
+  /** 默认断言 / 用例断言里「字段」下拉：Schema 字段 ∪ 测试集声明，同名以测试集类型为准 */
+  const mergedAssertionFieldOptions = useMemo(
+    () => mergeSchemaWithSuiteVarFields(refSchemaFields, extractSuiteVarFields(suiteForm.global_variables_json)),
+    [refSchemaFields, suiteForm.global_variables_json],
+  )
+
+  const suiteVarValueHints = useMemo(
+    () => extractSuiteVarValueHints(suiteForm.global_variables_json),
+    [suiteForm.global_variables_json],
+  )
+
   /** 用例编辑弹窗里的用例变量键（合并测试集声明） */
   const caseModalVarKeys = useMemo(
     () => mergeVarKeys(suiteDefinedVarKeys, extractVariableKeys(caseModal.variables_json)),
@@ -1374,7 +1385,7 @@ function SuitesSection(props: {
           <AssertionBuilder
             value={suiteForm.default_assertions_json}
             onChange={(next) => setSuiteForm({ ...suiteForm, default_assertions_json: next })}
-            schemaFields={refSchemaFields}
+            schemaFields={mergedAssertionFieldOptions}
             varKeys={suiteDefinedVarKeys}
           />
         </div>
@@ -1672,6 +1683,7 @@ function SuitesSection(props: {
                     value={caseModal.variables_json}
                     onChange={(next) => setCaseModal((m) => ({ ...m, variables_json: next }))}
                     knownKeys={suiteDefinedVarKeys}
+                    suiteVarHints={suiteVarValueHints}
                   />
                 </div>
               </div>
@@ -1685,7 +1697,7 @@ function SuitesSection(props: {
                       const empty = r.ok && r.value && Array.isArray(r.value.rules) && r.value.rules.length === 0
                       setCaseModal((m) => ({ ...m, assertions_override_json: empty ? '' : next }))
                     }}
-                    schemaFields={refSchemaFields}
+                    schemaFields={mergedAssertionFieldOptions}
                     varKeys={caseModalVarKeys}
                   />
                 </div>
@@ -1709,8 +1721,9 @@ function SuitesSection(props: {
           open={annotatorCaseId != null}
           suiteId={dataSuiteId}
           testCase={annotatorCase}
-          schemaFields={refSchemaFields}
+          schemaFields={mergedAssertionFieldOptions}
           suiteDefinedVarKeys={suiteDefinedVarKeys}
+          suiteVarHints={suiteVarValueHints}
           onClose={() => setAnnotatorCaseId(null)}
           onSave={async (payload) => {
             props.onError(null)

@@ -100,6 +100,14 @@ export type AssertionRule =
       inList?: string[];
       regex?: string;
       numericEquals?: number;
+      /** 路径取值为数组时：期望数组中每一项都在实际数组中出现（顺序无关，逐项 deep 比较） */
+      arrayContainsAll?: unknown[];
+      /** 同上，期望值来自合并后 variables 中同名键的 JSON 数组字符串 */
+      arrayContainsAllCaseVar?: string;
+      /** 路径取值与常量数组逐项、顺序完全一致（deep 比较） */
+      arrayEqualsConst?: unknown[];
+      /** 同上，期望值来自 variables 中同名键的 JSON 数组字符串 */
+      arrayEqualsCaseVar?: string;
     }
   | { type: 'customScript'; expression: string }
   | {

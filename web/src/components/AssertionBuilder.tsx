@@ -53,6 +53,8 @@ type VisualOp =
   | 'fieldRegex'
   | 'fieldExists'
   | 'fieldEmpty'
+  | 'fieldArrayContainsAll'
+  | 'fieldArrayEquals'
 
 const OP_LABEL: Record<VisualOp, string> = {
   contains: '整段包含',
@@ -64,6 +66,8 @@ const OP_LABEL: Record<VisualOp, string> = {
   fieldRegex: '匹配正则',
   fieldExists: '存在且非空',
   fieldEmpty: '为空或不存在',
+  fieldArrayContainsAll: '全部包含',
+  fieldArrayEquals: '数组相等',
 }
 
 const TEXT_OPS: VisualOp[] = ['contains', 'notContains', 'regex']
@@ -90,7 +94,7 @@ function allowedOps(sourceKind: SourceKind, fieldType?: string): VisualOp[] {
     case 'boolean':
       return ['fieldEquals', 'fieldExists', 'fieldEmpty']
     case 'array':
-      return ['fieldExists', 'fieldEmpty']
+      return ['fieldExists', 'fieldEmpty', 'fieldArrayContainsAll', 'fieldArrayEquals']
     case 'object':
       return ['fieldExists', 'fieldEmpty']
     default:
@@ -214,9 +218,72 @@ function toEditor(raw: unknown): EditorRule {
         data: { ...base, op: 'fieldRegex', expectedSource: 'const', expectedRegex: String(r.regex) },
       }
     }
+    if (r.arrayContainsAllCaseVar != null) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayContainsAll',
+          expectedSource: 'var',
+          expectedText: String(r.arrayContainsAllCaseVar),
+        },
+      }
+    }
+    if (Array.isArray(r.arrayContainsAll)) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayContainsAll',
+          expectedSource: 'const',
+          expectedText: JSON.stringify(r.arrayContainsAll),
+        },
+      }
+    }
+    if (r.arrayEqualsCaseVar != null) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayEquals',
+          expectedSource: 'var',
+          expectedText: String(r.arrayEqualsCaseVar),
+        },
+      }
+    }
+    if (Array.isArray(r.arrayEqualsConst)) {
+      return {
+        kind: 'visual',
+        data: {
+          ...base,
+          op: 'fieldArrayEquals',
+          expectedSource: 'const',
+          expectedText: JSON.stringify(r.arrayEqualsConst),
+        },
+      }
+    }
     return { kind: 'visual', data: { ...base, op: 'fieldExists' } }
   }
   return { kind: 'unknown', raw }
+}
+
+/** 解析「常量」数组：支持 JSON 数组或英文逗号分隔的字符串列表 */
+function parseConstArrayInput(text: string): unknown[] {
+  const t = text.trim()
+  if (!t) return []
+  if (t.startsWith('[')) {
+    try {
+      const v = JSON.parse(t) as unknown
+      if (Array.isArray(v)) return v
+    } catch {
+      /* fall through */
+    }
+    return []
+  }
+  return t
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
 }
 
 function visualToJsonRule(v: VisualRule): Record<string, unknown> | null {
@@ -247,6 +314,21 @@ function visualToJsonRule(v: VisualRule): Record<string, unknown> | null {
         type: 'customScript',
         expression: `(() => { try { const v = (parsedJson && typeof parsedJson === 'object') ? (${safePathExpr(path)}) : undefined; return v === undefined || v === null || v === ''; } catch { return true; } })()`,
       }
+    case 'fieldArrayContainsAll': {
+      const base: Record<string, unknown> = { type: 'jsonPath', path }
+      if (v.expectedSource === 'var') base.arrayContainsAllCaseVar = v.expectedText.trim()
+      else base.arrayContainsAll = parseConstArrayInput(v.expectedText)
+      return base
+    }
+    case 'fieldArrayEquals': {
+      const base: Record<string, unknown> = { type: 'jsonPath', path }
+      if (v.expectedSource === 'var') base.arrayEqualsCaseVar = v.expectedText.trim()
+      else base.arrayEqualsConst = parseConstArrayInput(v.expectedText)
+      return base
+    }
+    default: {
+      return null
+    }
   }
 }
 
@@ -557,6 +639,57 @@ function renderExpected(
   if (op === 'fieldExists' || op === 'fieldEmpty') {
     return <span className="abFieldFixed muted">（无需期望值）</span>
   }
+  if (op === 'fieldArrayContainsAll' || op === 'fieldArrayEquals') {
+    const ph =
+      op === 'fieldArrayContainsAll'
+        ? '常量：JSON 数组如 ["猪","牛"]，或英文逗号分隔'
+        : '常量：JSON 数组（顺序与模型输出逐项比较）'
+    const kindSelect = (
+      <select
+        className="abInput abInput--slim"
+        value={rule.expectedSource}
+        onChange={(e) =>
+          onChange({ expectedSource: e.target.value as ExpectedSource, expectedText: '' })
+        }
+      >
+        <option value="const">常量</option>
+        <option value="var">引用变量</option>
+      </select>
+    )
+    if (rule.expectedSource === 'var') {
+      const listId = `${listIdBase}-arrvar`
+      return (
+        <>
+          {kindSelect}
+          <input
+            className="abInput"
+            list={varKeys.length ? listId : undefined}
+            placeholder='变量名（对应值请填 JSON 数组文本，例如 ["a","b"]）'
+            value={rule.expectedText}
+            onChange={(e) => onChange({ expectedText: e.target.value })}
+          />
+          {varKeys.length ? (
+            <datalist id={listId}>
+              {varKeys.map((vk) => (
+                <option key={vk} value={vk} />
+              ))}
+            </datalist>
+          ) : null}
+        </>
+      )
+    }
+    return (
+      <>
+        {kindSelect}
+        <input
+          className="abInput"
+          placeholder={ph}
+          value={rule.expectedText}
+          onChange={(e) => onChange({ expectedText: e.target.value })}
+        />
+      </>
+    )
+  }
   if (op === 'fieldNumericEquals') {
     return (
       <input
@@ -612,7 +745,9 @@ function renderExpected(
       value={isFieldEquals ? rule.expectedSource : 'const'}
       disabled={!isFieldEquals}
       title={!isFieldEquals ? '仅「等于」支持变量来源' : ''}
-      onChange={(e) => onChange({ expectedSource: e.target.value as ExpectedSource })}
+      onChange={(e) =>
+        onChange({ expectedSource: e.target.value as ExpectedSource, expectedText: '' })
+      }
     >
       <option value="const">常量</option>
       <option value="var">引用变量</option>
@@ -691,4 +826,23 @@ function renderExpected(
       ) : null}
     </>
   )
+}
+
+/** 合并提示词 Schema 与测试集变量声明：同名时以测试集的 type / enum（预置项）为准。
+ * 测试集变量只用于覆盖同名字段，不追加为新的字段选项（字段只来自 Schema）。 */
+export function mergeSchemaWithSuiteVarFields(
+  schemaFields: SchemaFieldOption[],
+  suiteVarFields: SchemaFieldOption[],
+): SchemaFieldOption[] {
+  const suiteByName = new Map(suiteVarFields.map((f) => [f.name, f]))
+  return schemaFields.map((f) => {
+    const s = suiteByName.get(f.name)
+    if (!s) return { ...f }
+    return {
+      ...f,
+      type: s.type,
+      description: s.description || f.description,
+      enumValues: s.enumValues?.length ? s.enumValues : f.enumValues,
+    }
+  })
 }

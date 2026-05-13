@@ -169,12 +169,14 @@ cd server && npm run init-db:dev
 
 ### 测试集变量列表（绑在「测试集」上）
 
-在「测试集」编辑页用 **`SuiteVarListBuilder`** 可视化编辑。字段含义只有两个：
+在「测试集」编辑页用 **`SuiteVarListBuilder`** 可视化编辑。每条变量包含：
 
 - `name`：变量名（英文键，建议用驼峰），会作为用例变量的下拉候选和断言里「引用变量」的候选；
+- `type`：`string`（默认）/ `boolean` / `array`，用于**默认断言**里该路径（`$.name`）可选的操作符过滤；**不参与模板替换类型校验**；
+- `enum`（可选，仅建议与 **`type` 为 `array`** 同用）：字符串数组，如 `["猪","牛","鸡"]`。配置后，在**用例变量编辑**与**大图标注**里对该 key 填值时会出现**多选勾选**，自动写入 JSON 数组文本；仍可在同一行底部直接改 JSON。
 - `description`：说明文字（可选，仅给看的人参考），**不参与运行**。
 
-JSON 形态：`{"variables":[{"name":"storeName","description":"门店名"}, ...]}`。
+JSON 形态示例：`{"variables":[{"name":"livestock","type":"array","enum":["猪","牛","鸡"],"description":"活体生物列表"}, ...]}`。未写 `type` 的老数据按 `string` 读取。
 
 运行时变量合并链（从低优先级到高，**后者覆盖前者**）：
 
@@ -193,9 +195,9 @@ JSON 形态：`{"variables":[{"name":"storeName","description":"门店名"}, ...
 
 `AssertionBuilder` 把 `{ rules: [...] }` 渲染成可视化规则列表：
 
-- **字段来源**：整段输出文本（`contains`/`regex`）、Schema 字段（自动生成 `$.xxx`）、手写 JSONPath。
-- **操作符**：按字段类型自动过滤（例如 boolean 不出现「字段数值等于」）。
-- **期望值来源**：`常量` / `引用变量`。「引用变量」= 在当前用例合并后的 `variables` 里按名取值；候选由测试集变量列表 + 当前用例已填变量 合并得到，可从下拉选也可手输。
+- **字段来源**：整段输出文本（`contains`/`regex`）、**参考提示词模板**的 Schema 字段、**测试集变量声明**中尚未出现在 Schema 里的字段（自动生成 `$.变量名`）、手写 JSONPath。声明与 Schema **同名**时，**以测试集声明的 `type` 为准**决定操作符列表。
+- **操作符**：按字段类型自动过滤（例如 boolean 不出现「字段数值等于」）；**`array` 类型**额外支持「全部包含」「数组相等」。
+- **期望值来源**：`常量` / `引用变量`。「引用变量」= 在当前用例合并后的 `variables` 里按名取值；候选由测试集变量列表 + 当前用例已填变量 合并得到，可从下拉选也可手输。**数组类断言**要求对应变量值为 **JSON 数组字符串**（如 `["猪","牛"]`），与用例 `variables_json` 里字符串存储方式一致。
 - 老版 `equalsSuiteVar` 在读入时会被当作 `equalsCaseVar` 展示并保存；后端对老 `equalsSuiteVar` 字段仍做 fallback，保证历史规则不中断。
 - `customScript` 和 `llmJudge` 是**高级规则**，在可视化列表里以只读 JSON 卡片展示，可删除；编辑请切到「JSON 原文」标签页。
 
@@ -285,6 +287,8 @@ JSON 形态：`{"variables":[{"name":"storeName","description":"门店名"}, ...
 
 - **`equals`**：与固定字符串比较（`String(取值) === equals`）。
 - **`equalsCaseVar`**：与当前用例 **合并后的 `variables`（用例 `variables_json` + 清单 + 侧车 JSON 合并结果）** 中同名键的值比较（均为字符串化后比较）。例如模型输出 `{"storeName":"东南王村…"}`，期望来自侧车或清单里的 `storeName`，可写 `"path": "$.storeName", "equalsCaseVar": "storeName"`。若同时写 `equalsCaseVar` 与 `equals`，**优先使用 `equalsCaseVar`**。
+- **`arrayContainsAll`** / **`arrayContainsAllCaseVar`**：路径取值须为 **JSON 数组**；期望为常量数组或与变量名对应的 **JSON 数组字符串**（在 `variables` 里 `JSON.parse` 后须为数组）。语义：期望中**每一项**都在实际数组中至少出现一次（顺序无关，逐项 deep 比较，含嵌套对象时用 `JSON.stringify` 比较）。
+- **`arrayEqualsConst`** / **`arrayEqualsCaseVar`**：路径取值与期望数组 **长度相同、下标一一相等**（deep 比较规则同上）；期望来自常量或变量解析出的 JSON 数组。
 - **`equalsSuiteVar`**（已废弃语义，保留向后兼容）：历史上比较的是测试集 `global_variables_json` 里的值；新结构（`{variables:[...]}`）不再贡献值，此时引擎会 fallback 到当前用例合并后的 `variables[key]`，等价于 `equalsCaseVar`。优先级仍为 `equalsSuiteVar` > `equalsCaseVar` > `equals`。
 
 **模型原始响应与断言用的文本**：接口完整 JSON（含 `choices`、`usage` 等）存在运行结果的 **`raw_response_json`**。参与断言、并写入 **`model_output`** 的字符串是 **`choices[0].message.content` 原文**（即助手最终回复；若为 JSON 字符串可直接被 `jsonPath` 解析）。带深度思考时，`reasoning_content` **不会**再拼进 `model_output`，避免前面一大段推理导致无法 `JSON.parse`；推理内容仍在原始响应的 `message` 里可查。
@@ -349,6 +353,7 @@ Base URL 一般为控制台给出的 **OpenAI 兼容** 地址（如 `.../api/v3`
 
 ## 反思与后续可做
 
+- 测试集变量声明已支持 `string` / `boolean` / `array` 类型，并与默认断言字段下拉合并；`array` 支持「全部包含」「数组相等」后端校验。若用例里数组变量仍以非 JSON 字符串存储，数组类断言会失败，后续可在变量编辑器中按类型约束输入或自动 `JSON.stringify`。
 - 快速开始已写明：`npm run dev` 须在**项目根目录**执行才会前后端一起起；在 `web` 下只会起 Vite，并补充 `[server]`/`[web]` 日志与端口占用等自检说明。
 - 元数据已支持 **`image_root` 下 `image-tester-metadata.json` + 与主图同名的侧车 `.json`**：**磁盘键值覆盖库内**，侧车每次现读、清单按 `mtime+size` 失效缓存；测试集页编辑用例时提供 **生效元数据预览（约 3 秒刷新）** 与 `POST /api/test-suites/:suiteId/resolve-case-metadata` 接口。
 - 单图检测已改为「左侧直编提示词 + 右侧主图与元数据」，降低上手成本；若仍觉得占位符难记，可再加「一键插入 `{{img:main}}`」等快捷按钮。
