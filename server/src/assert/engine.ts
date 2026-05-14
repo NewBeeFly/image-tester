@@ -10,9 +10,12 @@ export type { LlmJudgeContext } from './llmJudge.js';
 
 function tryParseJson(text: string): unknown | undefined {
   const t = text.trim();
-  if (!t) return undefined;
+  // 去除 Markdown code block 包裹（如 ```json ... ```）
+  const codeBlockMatch = t.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  const jsonText = codeBlockMatch ? codeBlockMatch[1].trim() : t;
+  if (!jsonText) return undefined;
   try {
-    return JSON.parse(t) as unknown;
+    return JSON.parse(jsonText) as unknown;
   } catch {
     return undefined;
   }
