@@ -20,9 +20,7 @@ function tryParseJson(text: string): unknown | undefined {
 
 function applyJsonPath(path: string, data: unknown): unknown {
   const res = JSONPath({ path, json: data as object | unknown[], wrap: false });
-  if (Array.isArray(res)) {
-    return res.length <= 1 ? res[0] : res;
-  }
+  // 注意：不要对数组结果做自动拆包，调用方（如数组断言）需要完整的数组
   return res;
 }
 
