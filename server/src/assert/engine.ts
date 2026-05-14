@@ -54,16 +54,24 @@ function arrayEqualsIgnoreOrder(a: unknown[], b: unknown[]): boolean {
   return bRemaining.length === 0;
 }
 
+type StringOrArray = string | string[];
+
 /** 从用例 variables 字符串值解析 JSON 数组（用于数组类断言） */
 function parseCaseVarJsonArray(
-  caseVars: Record<string, string>,
-  suiteVars: Record<string, string>,
+  caseVars: Record<string, StringOrArray>,
+  suiteVars: Record<string, StringOrArray>,
   varName: string,
 ): { ok: true; arr: unknown[] } | { ok: false; detail: string } {
+  // 优先从 caseVars 获取，如果不存在则从 suiteVars 获取
   const raw = caseVars[varName] ?? suiteVars[varName] ?? '';
   if (raw === undefined || String(raw).trim() === '') {
     return { ok: false, detail: `变量「${varName}」为空` };
   }
+  // 如果 raw 本身已经是数组，直接返回
+  if (Array.isArray(raw)) {
+    return { ok: true, arr: raw };
+  }
+  // 否则尝试解析为 JSON 字符串
   try {
     const v = JSON.parse(String(raw).trim()) as unknown;
     if (!Array.isArray(v)) {
@@ -78,8 +86,8 @@ function parseCaseVarJsonArray(
 export function evaluateAssertionConfig(
   outputText: string,
   rules: AssertionRule[],
-  caseVars: Record<string, string>,
-  suiteVars: Record<string, string> = {},
+  caseVars: Record<string, StringOrArray>,
+  suiteVars: Record<string, StringOrArray> = {},
 ): { pass: boolean; results: RuleResult[] } {
   const parsedJson = tryParseJson(outputText);
   const results: RuleResult[] = [];
@@ -96,9 +104,9 @@ export function evaluateAssertionConfig(
 export async function evaluateAssertionConfigAsync(
   outputText: string,
   rules: AssertionRule[],
-  caseVars: Record<string, string>,
+  caseVars: Record<string, StringOrArray>,
   ctx: LlmJudgeContext,
-  suiteVars: Record<string, string> = {},
+  suiteVars: Record<string, StringOrArray> = {},
 ): Promise<{ pass: boolean; results: RuleResult[] }> {
   const parsedJson = tryParseJson(outputText);
   const results: RuleResult[] = [];
@@ -115,8 +123,8 @@ export async function evaluateAssertionConfigAsync(
 function evaluateRule(
   outputText: string,
   parsedJson: unknown,
-  caseVars: Record<string, string>,
-  suiteVars: Record<string, string>,
+  caseVars: Record<string, StringOrArray>,
+  suiteVars: Record<string, StringOrArray>,
   rule: AssertionRule,
 ): RuleResult {
   switch (rule.type) {

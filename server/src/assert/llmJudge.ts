@@ -68,7 +68,7 @@ export interface LlmJudgeContext {
 export async function evaluateLlmJudgeRule(
   rule: AssertionRule & { type: 'llmJudge' },
   visionOutputText: string,
-  caseVars: Record<string, string>,
+  caseVars: Record<string, string | string[]>,
   ctx: LlmJudgeContext,
 ): Promise<RuleResult> {
   const judgePrompt = promptsRepo.getPromptProfile(ctx.db, rule.judge_prompt_profile_id);

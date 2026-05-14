@@ -7,7 +7,7 @@ export type { VisionContentPart };
 
 /** 用例元数据：文本变量 + 多图别名（相对 image_root 的路径） */
 export interface CaseMetadata {
-  variables: Record<string, string>;
+  variables: Record<string, string | string[]>;
   images: Record<string, string>;
 }
 
@@ -25,13 +25,17 @@ export function parseCaseMetadataJson(raw: string): CaseMetadata {
     const o = v as Record<string, unknown>;
     if ('variables' in o || 'images' in o) {
       return {
-        variables: toStringRecord(o.variables),
-        images: toStringRecord(o.images),
+        variables: toStringRecord(o.variables) as Record<string, string | string[]>,
+        images: toStringRecord(o.images) as Record<string, string>,
       };
     }
-    const variables: Record<string, string> = {};
+    const variables: Record<string, string | string[]> = {};
     for (const [k, val] of Object.entries(o)) {
-      variables[k] = val == null ? '' : String(val);
+      if (Array.isArray(val)) {
+        variables[k] = val.map((v) => String(v ?? ''));
+      } else {
+        variables[k] = val == null ? '' : String(val);
+      }
     }
     return { variables, images: {} };
   } catch {
@@ -39,11 +43,16 @@ export function parseCaseMetadataJson(raw: string): CaseMetadata {
   }
 }
 
-function toStringRecord(x: unknown): Record<string, string> {
+function toStringRecord(x: unknown): Record<string, string | string[]> {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return {};
-  const out: Record<string, string> = {};
+  const out: Record<string, string | string[]> = {};
   for (const [k, val] of Object.entries(x as Record<string, unknown>)) {
-    out[k] = val == null ? '' : String(val);
+    // 保留数组类型，不转为字符串
+    if (Array.isArray(val)) {
+      out[k] = val.map((v) => String(v ?? ''));
+    } else if (val != null) {
+      out[k] = String(val);
+    }
   }
   return out;
 }
@@ -55,14 +64,18 @@ const VAR_LEGACY = /\{\{\s*([\w.-]+)\s*\}\}/g;
 /**
  * 仅替换文本占位符：`{{var:key}}` 优先，其次 `{{key}}`（不与 img: 冲突）
  */
-export function renderTextPlaceholders(template: string, variables: Record<string, string>): string {
-  let s = template.replace(VAR_EXPLICIT, (_, key: string) =>
-    Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] ?? '' : `{{var:${key}}}`,
-  );
+export function renderTextPlaceholders(template: string, variables: Record<string, string | string[]>): string {
+  let s = template.replace(VAR_EXPLICIT, (_, key: string) => {
+    const val = Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] : undefined;
+    if (val === undefined) return `{{var:${key}}}`;
+    // 数组类型转为 JSON 字符串
+    return Array.isArray(val) ? JSON.stringify(val) : (val ?? '');
+  });
   s = s.replace(VAR_LEGACY, (full, key: string) => {
     if (key.startsWith('img:')) return full;
     if (Object.prototype.hasOwnProperty.call(variables, key)) {
-      return variables[key] ?? '';
+      const val = variables[key];
+      return Array.isArray(val) ? JSON.stringify(val) : (val ?? '');
     }
     return full;
   });
@@ -169,13 +182,13 @@ export async function buildVisionRequestParts(
   imageRoot: string,
   fallbackRelative: string,
   options?: {
-    globalVariables?: Record<string, string>;
+    globalVariables?: Record<string, string | string[]>;
     mergedMetadataJson?: string | null;
   },
 ): Promise<{
   system: string | VisionContentPart[];
   user: VisionContentPart[];
-  variables: Record<string, string>;
+  variables: Record<string, string | string[]>;
 }> {
   const metaRaw = parseCaseMetadataJson(
     (options?.mergedMetadataJson && options.mergedMetadataJson.trim())

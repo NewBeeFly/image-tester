@@ -7,7 +7,7 @@ import { config } from '../config.js';
  */
 export function evalCustomAssertionExpression(
   expression: string,
-  ctx: { outputText: string; parsedJson: unknown; caseVars: Record<string, string> },
+  ctx: { outputText: string; parsedJson: unknown; caseVars: Record<string, string | string[]> },
 ): boolean {
   const wrapped = `"use strict"; (${expression})`;
   const sandbox: Record<string, unknown> = {
