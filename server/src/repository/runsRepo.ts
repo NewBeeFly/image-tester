@@ -203,9 +203,9 @@ export function listRunItemsWithCases(
   db: Database.Database,
   runId: number,
   opts?: { pass?: boolean; limit?: number },
-): Array<TestRunItem & { relative_image_path: string; suite_id: number }> {
+): Array<TestRunItem & { relative_image_path: string; suite_id: number; variables_json: string }> {
   let sql = `
-    SELECT i.*, c.relative_image_path, c.suite_id
+    SELECT i.*, c.relative_image_path, c.suite_id, c.variables_json
     FROM test_run_items i
     JOIN test_cases c ON c.id = i.case_id
     WHERE i.run_id = ?
@@ -222,7 +222,7 @@ export function listRunItemsWithCases(
     params.push(opts.limit);
   }
   return db.prepare(sql).all(...params) as Array<
-    TestRunItem & { relative_image_path: string; suite_id: number }
+    TestRunItem & { relative_image_path: string; suite_id: number; variables_json: string }
   >;
 }
 

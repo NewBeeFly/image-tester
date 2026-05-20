@@ -143,6 +143,7 @@ export interface TestRunItem {
 export interface RunItemDetail extends TestRunItem {
   relative_image_path: string;
   suite_id: number;
+  variables_json: string;
 }
 
 export function imageUrl(suiteId: number, relativePath: string): string {

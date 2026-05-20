@@ -6,6 +6,7 @@ import {
   useState,
   type InputHTMLAttributes,
 } from 'react'
+import ExcelJS from 'exceljs'
 import { createPortal, flushSync } from 'react-dom'
 import './App.css'
 import {
@@ -2577,6 +2578,7 @@ function ReportSection(props: {
   const [onlyFail, setOnlyFail] = useState(true)
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null)
   const [stopBusy, setStopBusy] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
 
   const suiteName = useMemo(() => {
     if (!run) return ''
@@ -2685,6 +2687,22 @@ function ReportSection(props: {
     }
   }
 
+  async function handleExport() {
+    if (runId == null || !run) return
+    onError(null)
+    setExportBusy(true)
+    try {
+      // 导出全量数据（不受 onlyFail 过滤限制）
+      const allItems = await getJson<RunItemDetail[]>(`/api/test-runs/${runId}/items-detail?limit=2000`)
+      const label = `suite${run.suite_id}-${run.status}`
+      await exportRunToExcel(runId, allItems, label)
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
   return (
     <div className="panel">
       <h2>运行记录</h2>
@@ -2718,6 +2736,16 @@ function ReportSection(props: {
           <button type="button" className="btn" onClick={() => runId && void loadRun(runId)}>
             刷新本运行
           </button>
+          {run ? (
+            <button
+              type="button"
+              className="btn"
+              disabled={exportBusy}
+              onClick={() => void handleExport()}
+            >
+              {exportBusy ? '导出中…' : '导出 Excel'}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -3019,4 +3047,215 @@ function verdictForItem(it: RunItemDetail): {
     return { headline: '判定通过', variant: 'ok', passLine, ruleRows: rows }
   }
   return { headline: '判定未通过', variant: 'fail', passLine, ruleRows: rows }
+}
+
+/**
+ * 将单次运行的所有用例明细导出为 Excel 文件。
+ *
+ * 列规则：
+ * - 图片（嵌入）：一列
+ * - 图片标注信息（variables_json 各字段）：每个字段一列
+ * - 模型输出各字段（若 model_output 是 JSON 对象）：每个字段一列；否则整体一列
+ * - 最终判定结果：一列
+ */
+async function exportRunToExcel(
+  runId: number,
+  items: RunItemDetail[],
+  runLabel: string,
+): Promise<void> {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('运行结果')
+
+  // 从 variables_json 取标注变量：结构为 {"variables":{...}, "images":{...}}
+  // 取 variables 子对象，若不存在则取顶层
+  function extractAnnotationVars(variablesJson: string): Record<string, unknown> | null {
+    if (!variablesJson) return null
+    try {
+      const j = JSON.parse(variablesJson) as unknown
+      if (!j || typeof j !== 'object' || Array.isArray(j)) return null
+      const top = j as Record<string, unknown>
+      // 优先取 variables 子层
+      if (top.variables && typeof top.variables === 'object' && !Array.isArray(top.variables)) {
+        return top.variables as Record<string, unknown>
+      }
+      return top
+    } catch { return null }
+  }
+
+  // --- 第一遍扫描：收集所有标注字段名 & model_output 字段名 ---
+  const annotationFieldNames: string[] = []
+  const modelFieldNames: string[] = []
+  const seenAnnotation = new Set<string>()
+  const seenModel = new Set<string>()
+
+  for (const it of items) {
+    const anno = extractAnnotationVars(it.variables_json)
+    if (anno) {
+      for (const k of Object.keys(anno)) {
+        if (!seenAnnotation.has(k)) { seenAnnotation.add(k); annotationFieldNames.push(k) }
+      }
+    }
+    if (it.model_output) {
+      try {
+        const j = JSON.parse(it.model_output) as unknown
+        if (j && typeof j === 'object' && !Array.isArray(j)) {
+          for (const k of Object.keys(j as Record<string, unknown>)) {
+            if (!seenModel.has(k)) { seenModel.add(k); modelFieldNames.push(k) }
+          }
+        }
+      } catch { /* 非 JSON */ }
+    }
+  }
+
+  const isModelJson = modelFieldNames.length > 0
+
+  // --- 构建表头 ---
+  const IMG_COL = 1
+  const ROW_HEIGHT = 80
+  const IMG_COL_WIDTH = 14
+
+  const headers: string[] = ['图片']
+  for (const f of annotationFieldNames) headers.push(`标注.${f}`)
+  if (isModelJson) {
+    for (const f of modelFieldNames) headers.push(`模型输出.${f}`)
+  } else {
+    headers.push('模型输出')
+  }
+  headers.push('最终判定')
+
+  sheet.addRow(headers)
+  sheet.getRow(1).eachCell((cell) => {
+    cell.font = { bold: true }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } }
+    cell.border = { bottom: { style: 'thin' } }
+    cell.alignment = { vertical: 'middle', wrapText: true }
+  })
+  sheet.getRow(1).height = 22
+
+  // 列宽
+  sheet.getColumn(IMG_COL).width = IMG_COL_WIDTH
+  let colIdx = 2
+  for (let i = 0; i < annotationFieldNames.length; i++) {
+    sheet.getColumn(colIdx + i).width = 24
+  }
+  colIdx += annotationFieldNames.length
+  const modelColCount = isModelJson ? modelFieldNames.length : 1
+  for (let i = 0; i < modelColCount; i++) {
+    sheet.getColumn(colIdx + i).width = 28
+  }
+  colIdx += modelColCount
+  sheet.getColumn(colIdx).width = 14
+
+  // --- 第二遍：填充数据行 + 嵌入图片 ---
+  for (let rowIdx = 0; rowIdx < items.length; rowIdx++) {
+    const it = items[rowIdx]
+    // ExcelJS 行列锚点从 0 开始，第 2 行（表头后第一条数据）对应 row=1
+    const anchorRow = rowIdx + 1  // 0-based，跳过表头(row=0)
+
+    const rowData: (string | number | null)[] = [null]  // 图片列占位
+
+    // 标注字段
+    const annoParsed = extractAnnotationVars(it.variables_json)
+    for (const f of annotationFieldNames) {
+      if (annoParsed && f in annoParsed) {
+        const v = annoParsed[f]
+        rowData.push(typeof v === 'object' ? JSON.stringify(v) : (v as string | number | null))
+      } else {
+        rowData.push(null)
+      }
+    }
+
+    // 模型输出字段
+    if (isModelJson) {
+      let parsed: Record<string, unknown> | null = null
+      if (it.model_output) {
+        try {
+          const j = JSON.parse(it.model_output) as unknown
+          if (j && typeof j === 'object' && !Array.isArray(j)) parsed = j as Record<string, unknown>
+        } catch { /* 忽略 */ }
+      }
+      for (const f of modelFieldNames) {
+        if (parsed && f in parsed) {
+          const v = parsed[f]
+          rowData.push(typeof v === 'object' ? JSON.stringify(v) : (v as string | number | null))
+        } else {
+          rowData.push(null)
+        }
+      }
+    } else {
+      rowData.push(it.model_output ?? it.error_message ?? null)
+    }
+
+    // 最终判定
+    const verdict = verdictForItem(it)
+    rowData.push(verdict.headline)
+
+    const dataRow = sheet.addRow(rowData)
+    dataRow.height = ROW_HEIGHT
+    dataRow.alignment = { vertical: 'middle', wrapText: true }
+
+    const verdictCell = dataRow.getCell(headers.length)
+    if (verdict.variant === 'ok') {
+      verdictCell.font = { color: { argb: 'FF1A7C3E' } }
+    } else if (verdict.variant === 'fail') {
+      verdictCell.font = { color: { argb: 'FFB91C1C' } }
+    } else {
+      verdictCell.font = { color: { argb: 'FF92400E' } }
+    }
+
+    // 嵌入图片：用 tl 锚点 + extent 固定尺寸，保证每行对齐
+    try {
+      const thumb = await resizeImageToThumb(imageUrl(it.suite_id, it.relative_image_path), 100, 75)
+      if (thumb) {
+        const imageId = workbook.addImage({ buffer: thumb.buffer, extension: 'png' })
+        sheet.addImage(imageId, {
+          tl: { col: 0, row: anchorRow },
+          ext: { width: thumb.width, height: thumb.height },
+        })
+      }
+    } catch { /* 图片加载失败跳过 */ }
+  }
+
+  const buf = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buf], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `run-${runId}-${runLabel}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** 将图片 URL 缩放到指定宽度，返回 { buffer, width, height } */
+async function resizeImageToThumb(
+  url: string,
+  targetWidth: number,
+  targetHeight: number,
+): Promise<{ buffer: ArrayBuffer; width: number; height: number } | null> {
+  const resp = await fetch(url)
+  if (!resp.ok) return null
+  const blob = await resp.blob()
+  const img = new Image()
+  const srcUrl = URL.createObjectURL(blob)
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('image load failed'))
+    img.src = srcUrl
+  })
+  URL.revokeObjectURL(srcUrl)
+
+  // 按目标宽高比缩放到目标宽度内
+  const ratio = Math.min(targetWidth / img.naturalWidth, targetHeight / img.naturalHeight)
+  const w = Math.round(img.naturalWidth * ratio)
+  const h = Math.round(img.naturalHeight * ratio)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0, w, h)
+
+  const pngBlob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'))
+  return { buffer: await pngBlob.arrayBuffer(), width: w, height: h }
 }
