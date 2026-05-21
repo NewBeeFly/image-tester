@@ -3111,8 +3111,8 @@ async function exportRunToExcel(
 
   // --- 构建表头 ---
   const IMG_COL = 1
-  const ROW_HEIGHT = 150
-  const IMG_COL_WIDTH = 20
+  const ROW_HEIGHT = 80
+  const IMG_COL_WIDTH = 16
 
   const headers: string[] = ['图片']
   for (const f of annotationFieldNames) headers.push(`标注.${f}`)
@@ -3203,14 +3203,18 @@ async function exportRunToExcel(
       verdictCell.font = { color: { argb: 'FF92400E' } }
     }
 
-    // 嵌入图片：压缩到 1MB 以内但保持较高分辨率，同时在超链接列放原图 URL
+    // 嵌入图片：数据保持原分辨率（压缩到1MB以内），显示尺寸适配行高
     try {
       const compressed = await compressImageUnderSize(imageUrl(it.suite_id, it.relative_image_path), 1024 * 1024)
       if (compressed) {
         const imageId = workbook.addImage({ buffer: compressed.buffer, extension: 'jpeg' })
+        // 显示尺寸按行高等比缩放，图片数据仍保持原分辨率，放大可看清
+        const displayHeight = 100
+        const ratio = displayHeight / compressed.height
+        const displayWidth = Math.round(compressed.width * ratio)
         sheet.addImage(imageId, {
           tl: { col: 0, row: anchorRow },
-          ext: { width: compressed.width, height: compressed.height },
+          ext: { width: displayWidth, height: displayHeight },
         })
       }
     } catch { /* 图片加载失败跳过 */ }
