@@ -3111,8 +3111,8 @@ async function exportRunToExcel(
 
   // --- 构建表头 ---
   const IMG_COL = 1
-  const ROW_HEIGHT = 80
-  const IMG_COL_WIDTH = 14
+  const ROW_HEIGHT = 150
+  const IMG_COL_WIDTH = 20
 
   const headers: string[] = ['图片']
   for (const f of annotationFieldNames) headers.push(`标注.${f}`)
@@ -3203,14 +3203,14 @@ async function exportRunToExcel(
       verdictCell.font = { color: { argb: 'FF92400E' } }
     }
 
-    // 嵌入图片：用 tl 锚点 + extent 固定尺寸，保证每行对齐
+    // 嵌入图片：压缩到 1MB 以内但保持较高分辨率，同时在超链接列放原图 URL
     try {
-      const thumb = await resizeImageToThumb(imageUrl(it.suite_id, it.relative_image_path), 100, 75)
-      if (thumb) {
-        const imageId = workbook.addImage({ buffer: thumb.buffer, extension: 'png' })
+      const compressed = await compressImageUnderSize(imageUrl(it.suite_id, it.relative_image_path), 1024 * 1024)
+      if (compressed) {
+        const imageId = workbook.addImage({ buffer: compressed.buffer, extension: 'jpeg' })
         sheet.addImage(imageId, {
           tl: { col: 0, row: anchorRow },
-          ext: { width: thumb.width, height: thumb.height },
+          ext: { width: compressed.width, height: compressed.height },
         })
       }
     } catch { /* 图片加载失败跳过 */ }
@@ -3228,11 +3228,10 @@ async function exportRunToExcel(
   URL.revokeObjectURL(url)
 }
 
-/** 将图片 URL 缩放到指定宽度，返回 { buffer, width, height } */
-async function resizeImageToThumb(
+/** 将图片压缩到指定大小以内，保持原图分辨率不变，仅通过 JPEG 质量控制文件大小 */
+async function compressImageUnderSize(
   url: string,
-  targetWidth: number,
-  targetHeight: number,
+  maxSizeBytes: number,
 ): Promise<{ buffer: ArrayBuffer; width: number; height: number } | null> {
   const resp = await fetch(url)
   if (!resp.ok) return null
@@ -3246,16 +3245,31 @@ async function resizeImageToThumb(
   })
   URL.revokeObjectURL(srcUrl)
 
-  // 按目标宽高比缩放到目标宽度内
-  const ratio = Math.min(targetWidth / img.naturalWidth, targetHeight / img.naturalHeight)
-  const w = Math.round(img.naturalWidth * ratio)
-  const h = Math.round(img.naturalHeight * ratio)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, 0, 0, w, h)
+  // 保持原图分辨率不变
+  const width = img.naturalWidth
+  const height = img.naturalHeight
 
-  const pngBlob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'))
-  return { buffer: await pngBlob.arrayBuffer(), width: w, height: h }
+  // 从高质量开始，仅通过降低 JPEG 质量来控制文件大小，不降低分辨率
+  let quality = 0.92
+  let jpegBlob: Blob | null = null
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(img, 0, 0, width, height)
+
+    jpegBlob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((b) => resolve(b!), 'image/jpeg', quality),
+    )
+
+    if (jpegBlob.size <= maxSizeBytes) break
+
+    // 仅降低质量，不降低分辨率
+    quality = Math.max(0.1, quality - 0.05)
+  }
+
+  if (!jpegBlob) return null
+  return { buffer: await jpegBlob.arrayBuffer(), width, height }
 }
