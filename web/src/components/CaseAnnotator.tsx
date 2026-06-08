@@ -115,6 +115,27 @@ export function CaseAnnotator(props: {
     }
   }
 
+  /** 翻页：草稿未保存时先保存当前用例，成功后再通知父级切 */
+  async function handleNavigate(direction: -1 | 1) {
+    try {
+      if (dirtyRef.current) {
+        // 草稿未保存：先保存当前用例
+        const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarHints)
+        const merged = mergeVariablesJson(variablesJson, suiteDefaults)
+        await onSave({
+          relative_image_path: relativePath,
+          variables_json: merged || '{}',
+          assertions_override_json: assertionsJson,
+        })
+        dirtyRef.current = false
+        onDirtyChange?.(false)
+      }
+      await onRequestNavigate(direction)
+    } catch (e) {
+      setError((e as Error).message || '翻页失败')
+    }
+  }
+
   // 断言"引用变量"候选：测试集声明 + 当前用例 variables 已填 key（去重）
   const caseKeys = extractCaseVarKeys(variablesJson)
   const varKeys = Array.from(new Set([...suiteDefinedVarKeys, ...caseKeys]))
@@ -136,8 +157,8 @@ export function CaseAnnotator(props: {
               alt={testCase.relative_image_path}
               hasPrev={currentIndex > 0}
               hasNext={currentIndex >= 0 && currentIndex < caseList.length - 1}
-              onPrev={() => void onRequestNavigate(-1)}
-              onNext={() => void onRequestNavigate(1)}
+              onPrev={() => void handleNavigate(-1)}
+              onNext={() => void handleNavigate(1)}
             />
           </div>
           <div className="annotatorForm">

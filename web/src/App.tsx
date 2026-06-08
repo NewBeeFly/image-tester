@@ -829,6 +829,29 @@ function SuitesSection(props: {
     [annotatorCaseId, cases],
   )
 
+  /** annotatorCase 在当前可见 cases 中的下标；找不到时为 -1 */
+  const annotatorIndex = useMemo(
+    () => (annotatorCaseId != null ? cases.findIndex((c) => c.id === annotatorCaseId) : -1),
+    [annotatorCaseId, cases],
+  )
+
+  /** 大图标注草稿是否改动；翻页前由 CaseAnnotator 内部协调先保存 */
+  const annotatorDirtyRef = useRef(false)
+
+  /** 翻页：父级仅负责计算下一个 id 并切换。草稿保存由 CaseAnnotator 内部协调。 */
+  const navigateCase = useCallback(
+    (direction: -1 | 1) => {
+      if (annotatorCaseId == null) return
+      const idx = cases.findIndex((c) => c.id === annotatorCaseId)
+      if (idx < 0) return
+      const nextIdx = idx + direction
+      if (nextIdx < 0 || nextIdx >= cases.length) return
+      const next = cases[nextIdx]
+      setAnnotatorCaseId(next.id)
+    },
+    [annotatorCaseId, cases],
+  )
+
   /** 加载服务器 image_root 下子目录列表 */
   const refreshDirOptions = useCallback(async (sid: number) => {
     try {
@@ -1795,6 +1818,12 @@ function SuitesSection(props: {
           schemaFields={assertionFieldOptions}
           suiteDefinedVarKeys={suiteDefinedVarKeys}
           suiteVarHints={suiteVarValueHints}
+          caseList={cases}
+          currentIndex={annotatorIndex}
+          onRequestNavigate={(d) => navigateCase(d)}
+          onDirtyChange={(dirty) => {
+            annotatorDirtyRef.current = dirty
+          }}
           onClose={() => setAnnotatorCaseId(null)}
           onSave={async (payload) => {
             props.onError(null)
