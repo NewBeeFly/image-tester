@@ -31,7 +31,11 @@ export function CaseAnnotator(props: {
   currentIndex: number
   /** 翻页：父级负责保存 + 切换 id */
   onRequestNavigate: (direction: -1 | 1) => Promise<void> | void
-  /** 把"草稿是否改动"上抛给父级（父级决定是否在翻页前自动保存） */
+  /**
+   * 把"草稿是否改动"上抛给父级（父级决定是否在翻页前自动保存）。
+   * 函数引用稳定性无要求：内部仅在 [open, testCase.id] 变化时调用，
+   * 父级可传每次渲染新建的箭头函数（ref-mutating 实现最合适）。
+   */
   onDirtyChange?: (dirty: boolean) => void
   onClose: () => void
   onSave: (payload: {
@@ -60,7 +64,7 @@ export function CaseAnnotator(props: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const ivRef = useRef<ImageViewerHandle | null>(null)
-  const isInternalChangeRef = useRef(false)
+  const dirtyRef = useRef(false)
 
   // 初始化：当弹窗打开时，合并测试集默认值 + 用例已有变量
   useEffect(() => {
@@ -73,7 +77,7 @@ export function CaseAnnotator(props: {
     setVariablesJson(merged)
     // 重置图片查看器 + 关闭 dirty 标记
     ivRef.current?.resetView()
-    isInternalChangeRef.current = false
+    dirtyRef.current = false
     onDirtyChange?.(false)
   }, [open, testCase.id])
 
@@ -101,7 +105,7 @@ export function CaseAnnotator(props: {
         assertions_override_json: assertionsJson,
       })
       // 保存成功 -> 清 dirty
-      isInternalChangeRef.current = false
+      dirtyRef.current = false
       onDirtyChange?.(false)
       onClose()
     } catch (e) {
@@ -142,7 +146,7 @@ export function CaseAnnotator(props: {
               <input
                 value={relativePath}
                 onChange={(e) => {
-                  isInternalChangeRef.current = true
+                  dirtyRef.current = true
                   onDirtyChange?.(true)
                   setRelativePath(e.target.value)
                 }}
@@ -154,7 +158,7 @@ export function CaseAnnotator(props: {
               <VariableBuilder
                 value={variablesJson}
                 onChange={(v) => {
-                  isInternalChangeRef.current = true
+                  dirtyRef.current = true
                   onDirtyChange?.(true)
                   setVariablesJson(v)
                 }}
@@ -173,7 +177,7 @@ export function CaseAnnotator(props: {
               <AssertionBuilder
                 value={assertionsJson || '{"rules":[]}'}
                 onChange={(next) => {
-                  isInternalChangeRef.current = true
+                  dirtyRef.current = true
                   onDirtyChange?.(true)
                   // 用户清空/全部删除规则时，保持空串表示"沿用测试集默认"
                   const r = safeParseOrNull(next)
