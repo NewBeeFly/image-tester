@@ -40,9 +40,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
   const [tx, setTx] = useState(0)
   const [ty, setTy] = useState(0)
   const [status, setStatus] = useState<Status>('loading')
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
-  // 占位：natural 供 Task 2/3 计算 fit 缩放使用
-  void natural
+  const naturalRef = useRef<{ w: number; h: number } | null>(null)
   const [retryToken, setRetryToken] = useState(0)
 
   // 关闭所有内部交互时暴露给父级：缩放重置、平移归零
@@ -61,7 +59,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
 
   const handleLoad = useCallback(() => {
     const img = imgRef.current
-    if (img) setNatural({ w: img.naturalWidth, h: img.naturalHeight })
+    if (img) naturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
     setStatus('idle')
   }, [])
 
@@ -92,8 +90,78 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     setTy(0)
   }, [])
 
+  // 滚轮缩放：仅在 stage 上拦截，preventDefault 防止外层列表滚动
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const stage = stageRef.current
+    if (!stage) return
+    const rect = stage.getBoundingClientRect()
+    // wrap 中心 = stage 中心；transform-origin 也在 wrap 中心
+    const centerX = rect.width / 2
+    const centerY = rect.height / 2
+    // 光标在「wrap 坐标系」中的位置（已考虑 tx/ty 平移）
+    const cursorOnWrapX = e.clientX - rect.left - centerX - tx
+    const cursorOnWrapY = e.clientY - rect.top - centerY - ty
+    const factor = Math.exp(-e.deltaY * 0.0015)
+    setScale((prevScale) => {
+      const newScale = clamp(prevScale * factor, MIN_SCALE, MAX_SCALE)
+      const ratio = newScale / prevScale
+      // 保持光标下像素不动：光标在 wrap 坐标系的偏移等比缩放
+      setTx((_prevTx) => {
+        const newCursorX = cursorOnWrapX / ratio
+        return centerX + newCursorX - (e.clientX - rect.left - centerX)
+      })
+      setTy((_prevTy) => {
+        const newCursorY = cursorOnWrapY / ratio
+        return centerY + newCursorY - (e.clientY - rect.top - centerY)
+      })
+      return newScale
+    })
+  }, [tx, ty])
+
+  // 拖动：仅记录拖动起点，松手前持续更新 tx/ty
+  const dragRef = useRef<{ active: boolean; startX: number; startY: number; baseTx: number; baseTy: number }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    baseTx: 0,
+    baseTy: 0,
+  })
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+    dragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      baseTx: tx,
+      baseTy: ty,
+    }
+  }, [tx, ty])
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active) return
+    setTx(dragRef.current.baseTx + (e.clientX - dragRef.current.startX))
+    setTy(dragRef.current.baseTy + (e.clientY - dragRef.current.startY))
+  }, [])
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active) return
+    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+    dragRef.current.active = false
+  }, [])
+
   return (
-    <div className="ivStage" ref={stageRef}>
+    <div
+      className="ivStage"
+      ref={stageRef}
+      onWheel={handleWheel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    >
       <div
         className="ivImgWrap"
         style={{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }}
