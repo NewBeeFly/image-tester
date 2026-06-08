@@ -62,6 +62,10 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     const img = imgRef.current
     if (img) naturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
     setStatus('idle')
+    // 自然加载时把 view 重置为 fit
+    setScale(1)
+    setTx(0)
+    setTy(0)
   }, [])
 
   const handleError = useCallback(() => {
@@ -78,10 +82,30 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     setScale((s) => clamp(s / STEP, MIN_SCALE, MAX_SCALE))
   }, [])
 
-  // 工具条：点击倍率 — 100% ↔ 适应
-  // TODO 占位：当前恒为 1，fit vs 100% 切换需要 stage 尺寸（Task 3 之后才能实现）
+  // 工具条：点击倍率 — 100% ↔ fit 切换（未加载时只到 100%）
   const toggleFit100 = useCallback(() => {
-    setScale((s) => (s === 1 ? 1 : 1))
+    setScale((prev) => {
+      const stage = stageRef.current
+      const natural = naturalRef.current
+      if (!stage || !natural) return 1  // 兜底：未加载则回到 1
+      const fitScale = Math.min(stage.clientWidth / natural.w, stage.clientHeight / natural.h)
+      if (fitScale <= 0) return 1
+      // 如果当前是 1 (或非常接近 fitScale)，切到另一个
+      if (Math.abs(prev - 1) < 0.001) {
+        setTx(0)
+        setTy(0)
+        return fitScale
+      }
+      if (Math.abs(prev - fitScale) < 0.001) {
+        setTx(0)
+        setTy(0)
+        return 1
+      }
+      // 其他缩放状态：回到 1
+      setTx(0)
+      setTy(0)
+      return 1
+    })
   }, [])
 
   // 工具条：适应
