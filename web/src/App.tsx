@@ -835,9 +835,6 @@ function SuitesSection(props: {
     [annotatorCaseId, cases],
   )
 
-  /** 大图标注草稿是否改动；翻页前由 CaseAnnotator 内部协调先保存 */
-  const annotatorDirtyRef = useRef(false)
-
   /** 翻页：父级仅负责计算下一个 id 并切换。草稿保存由 CaseAnnotator 内部协调。 */
   const navigateCase = useCallback(
     (direction: -1 | 1) => {
@@ -1821,9 +1818,6 @@ function SuitesSection(props: {
           caseList={cases}
           currentIndex={annotatorIndex}
           onRequestNavigate={(d) => navigateCase(d)}
-          onDirtyChange={(dirty) => {
-            annotatorDirtyRef.current = dirty
-          }}
           onClose={() => setAnnotatorCaseId(null)}
           onSave={async (payload) => {
             props.onError(null)
