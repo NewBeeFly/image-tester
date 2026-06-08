@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { imageUrl, type TestCase } from '../api'
 import { AssertionBuilder, type SchemaFieldOption } from './AssertionBuilder'
 import { VariableBuilder } from './VariableBuilder'
 import type { SuiteVarValueHint } from './SuiteVarListBuilder'
+import { ImageViewer, type ImageViewerHandle } from './ImageViewer'
 
 /**
  * 大图标注弹窗：左大图、右可视化表单。
@@ -24,6 +25,14 @@ export function CaseAnnotator(props: {
   suiteDefinedVarKeys: string[]
   /** 测试集变量类型与 array 枚举，供变量值多选 */
   suiteVarHints: Record<string, SuiteVarValueHint>
+  /** 当前测试集下全部用例的可见顺序 */
+  caseList: TestCase[]
+  /** testCase 在 caseList 中的下标；找不到时为 -1 */
+  currentIndex: number
+  /** 翻页：父级负责保存 + 切换 id */
+  onRequestNavigate: (direction: -1 | 1) => Promise<void> | void
+  /** 把"草稿是否改动"上抛给父级（父级决定是否在翻页前自动保存） */
+  onDirtyChange?: (dirty: boolean) => void
   onClose: () => void
   onSave: (payload: {
     relative_image_path: string
@@ -31,12 +40,27 @@ export function CaseAnnotator(props: {
     assertions_override_json: string
   }) => Promise<void> | void
 }) {
-  const { open, suiteId, testCase, schemaFields, suiteDefinedVarKeys, suiteVarHints, onClose, onSave } = props
+  const {
+    open,
+    suiteId,
+    testCase,
+    schemaFields,
+    suiteDefinedVarKeys,
+    suiteVarHints,
+    caseList,
+    currentIndex,
+    onRequestNavigate,
+    onDirtyChange,
+    onClose,
+    onSave,
+  } = props
   const [relativePath, setRelativePath] = useState(testCase.relative_image_path)
   const [variablesJson, setVariablesJson] = useState('')
   const [assertionsJson, setAssertionsJson] = useState(testCase.assertions_override_json ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const ivRef = useRef<ImageViewerHandle | null>(null)
+  const isInternalChangeRef = useRef(false)
 
   // 初始化：当弹窗打开时，合并测试集默认值 + 用例已有变量
   useEffect(() => {
@@ -47,6 +71,10 @@ export function CaseAnnotator(props: {
     const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarHints)
     const merged = mergeVariablesJson(testCase.variables_json || '{}', suiteDefaults)
     setVariablesJson(merged)
+    // 重置图片查看器 + 关闭 dirty 标记
+    ivRef.current?.resetView()
+    isInternalChangeRef.current = false
+    onDirtyChange?.(false)
   }, [open, testCase.id])
 
   useEffect(() => {
@@ -72,6 +100,9 @@ export function CaseAnnotator(props: {
         variables_json: merged || '{}',
         assertions_override_json: assertionsJson,
       })
+      // 保存成功 -> 清 dirty
+      isInternalChangeRef.current = false
+      onDirtyChange?.(false)
       onClose()
     } catch (e) {
       setError((e as Error).message || '保存失败')
@@ -95,9 +126,14 @@ export function CaseAnnotator(props: {
         </div>
         <div className="annotatorBody">
           <div className="annotatorImage">
-            <img
+            <ImageViewer
+              ref={ivRef}
               src={imageUrl(suiteId, testCase.relative_image_path)}
               alt={testCase.relative_image_path}
+              hasPrev={currentIndex > 0}
+              hasNext={currentIndex >= 0 && currentIndex < caseList.length - 1}
+              onPrev={() => void onRequestNavigate(-1)}
+              onNext={() => void onRequestNavigate(1)}
             />
           </div>
           <div className="annotatorForm">
@@ -105,7 +141,11 @@ export function CaseAnnotator(props: {
               <span className="muted" style={{ fontSize: 12 }}>主图相对路径</span>
               <input
                 value={relativePath}
-                onChange={(e) => setRelativePath(e.target.value)}
+                onChange={(e) => {
+                  isInternalChangeRef.current = true
+                  onDirtyChange?.(true)
+                  setRelativePath(e.target.value)
+                }}
               />
             </label>
 
@@ -113,7 +153,11 @@ export function CaseAnnotator(props: {
               <h4>变量</h4>
               <VariableBuilder
                 value={variablesJson}
-                onChange={setVariablesJson}
+                onChange={(v) => {
+                  isInternalChangeRef.current = true
+                  onDirtyChange?.(true)
+                  setVariablesJson(v)
+                }}
                 knownKeys={suiteDefinedVarKeys}
                 suiteVarHints={suiteVarHints}
               />
@@ -129,6 +173,8 @@ export function CaseAnnotator(props: {
               <AssertionBuilder
                 value={assertionsJson || '{"rules":[]}'}
                 onChange={(next) => {
+                  isInternalChangeRef.current = true
+                  onDirtyChange?.(true)
                   // 用户清空/全部删除规则时，保持空串表示"沿用测试集默认"
                   const r = safeParseOrNull(next)
                   if (!r || (Array.isArray(r.rules) && r.rules.length === 0)) {
