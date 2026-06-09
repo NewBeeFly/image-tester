@@ -28,6 +28,7 @@ import {
 import { PROVIDER_FORM_PRESETS } from './providerPresets'
 import { AssertionBuilder, type SchemaFieldOption } from './components/AssertionBuilder'
 import { CaseAnnotator } from './components/CaseAnnotator'
+import { ImageViewer } from './components/ImageViewer'
 import { SchemaBuilder } from './components/SchemaBuilder'
 import { VariableBuilder } from './components/VariableBuilder'
 import { SuiteVarListBuilder, extractSuiteVarFields, extractSuiteVarNames, extractSuiteVarValueHints } from './components/SuiteVarListBuilder'
@@ -2918,12 +2919,12 @@ function ReportSection(props: {
           >
             关闭
           </button>
-          <img
-            className="reportImageLarge"
-            src={previewImage.src}
-            alt={previewImage.alt}
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', height: '100%' }}>
+            <ImageViewer
+              src={previewImage.src}
+              alt={previewImage.alt}
+            />
+          </div>
         </div>
       ) : null}
     </div>
