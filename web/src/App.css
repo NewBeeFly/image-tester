@@ -1799,19 +1799,21 @@ select.abInput {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: rgba(15, 23, 42, 0.7);
+  background: rgba(15, 23, 42, 0.78);
   color: #fff;
   border: 0;
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
+  opacity: 0.4;
+  transition: opacity 0.15s, background 0.15s;
   z-index: 2;
 }
 
+.ivNav:hover,
 .ivStage:hover .ivNav {
-  opacity: 0.9;
+  opacity: 0.95;
+  background: rgba(15, 23, 42, 0.95);
 }
 
 .ivNav:hover {

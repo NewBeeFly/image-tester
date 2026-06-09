@@ -58,6 +58,30 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     setStatus('loading')
   }, [src, retryToken])
 
+  // 滚轮缩放：原生非 passive 监听器（React 19 的 onWheel 是 passive，preventDefault 无效）
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = stage.getBoundingClientRect()
+      const centerX = rect.width / 2
+      const centerY = rect.height / 2
+      const cursorOffsetX = e.clientX - rect.left - centerX - tx
+      const cursorOffsetY = e.clientY - rect.top - centerY - ty
+      const pixX = cursorOffsetX / scale
+      const pixY = cursorOffsetY / scale
+      const factor = Math.exp(-e.deltaY * WHEEL_SENSITIVITY)
+      const newScale = clamp(scale * factor, MIN_SCALE, MAX_SCALE)
+      if (newScale === scale) return
+      setScale(newScale)
+      setTx(e.clientX - rect.left - centerX - newScale * pixX)
+      setTy(e.clientY - rect.top - centerY - newScale * pixY)
+    }
+    stage.addEventListener('wheel', onWheel, { passive: false })
+    return () => stage.removeEventListener('wheel', onWheel)
+  }, [tx, ty, scale])
+
   const handleLoad = useCallback(() => {
     const img = imgRef.current
     if (img) naturalRef.current = { w: img.naturalWidth, h: img.naturalHeight }
@@ -115,31 +139,6 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     setTy(0)
   }, [])
 
-  // 滚轮缩放：仅在 stage 上拦截，preventDefault 防止外层列表滚动
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      const stage = stageRef.current
-      if (!stage) return
-      e.preventDefault()
-      const rect = stage.getBoundingClientRect()
-      const centerX = rect.width / 2
-      const centerY = rect.height / 2
-      // 屏幕坐标 → wrap 中心坐标 → wrap 局部像素（除以当前 scale）
-      const cursorOffsetX = e.clientX - rect.left - centerX - tx
-      const cursorOffsetY = e.clientY - rect.top - centerY - ty
-      const pixX = cursorOffsetX / scale
-      const pixY = cursorOffsetY / scale
-      const factor = Math.exp(-e.deltaY * WHEEL_SENSITIVITY)
-      const newScale = clamp(scale * factor, MIN_SCALE, MAX_SCALE)
-      if (newScale === scale) return
-      setScale(newScale)
-      // 保持光标下像素不动：newTx = cursorOffset - newScale · pixX
-      setTx(e.clientX - rect.left - centerX - newScale * pixX)
-      setTy(e.clientY - rect.top - centerY - newScale * pixY)
-    },
-    [tx, ty, scale],
-  )
-
   // 拖动：仅记录拖动起点，松手前持续更新 tx/ty
   const dragRef = useRef<{ active: boolean; startX: number; startY: number; baseTx: number; baseTy: number }>({
     active: false,
@@ -177,7 +176,6 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
     <div
       className="ivStage"
       ref={stageRef}
-      onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
