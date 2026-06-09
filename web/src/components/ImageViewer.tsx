@@ -150,6 +150,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, Props>(function ImageVi
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
+    // 翻页按钮 / 工具条上的 pointerdown 不应触发拖动
+    if ((e.target as HTMLElement).closest('.ivNav, .ivToolbar, .ivSpinner, .ivError')) return
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = {
       active: true,
