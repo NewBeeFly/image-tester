@@ -65,20 +65,62 @@ export function CaseAnnotator(props: {
   const [error, setError] = useState<string | null>(null)
   const ivRef = useRef<ImageViewerHandle | null>(null)
   const dirtyRef = useRef(false)
+  /**
+   * 打开弹窗时的 testCase 原始快照。dirty 比较的对象。
+   * 注意：variables_json 比较时用 useEffect 合并前的 testCase.variables_json，
+   * 因为 useEffect 后的 merged 可能引入了 suite defaults 的差异（这就是 bug 修复点）。
+   */
+  const originalRef = useRef<{
+    relative_image_path: string
+    variables_json: string
+    assertions_override_json: string
+  } | null>(null)
+
+  /** 比较当前 state 与原始 testCase 快照，更新 dirty 标志 */
+  function computeAndSetDirty(
+    relPath: string,
+    varsJson: string,
+    assertsJson: string,
+  ) {
+    const orig = originalRef.current
+    if (!orig) {
+      dirtyRef.current = false
+      return
+    }
+    const isDirty =
+      relPath !== orig.relative_image_path ||
+      varsJson !== orig.variables_json ||
+      assertsJson !== orig.assertions_override_json
+    if (dirtyRef.current !== isDirty) {
+      dirtyRef.current = isDirty
+      onDirtyChange?.(isDirty)
+    }
+  }
 
   // 初始化：当弹窗打开时，合并测试集默认值 + 用例已有变量
   useEffect(() => {
     if (!open) return
+    // 先记原始 testCase 快照（基于原始 JSON，而不是合并后的）
+    originalRef.current = {
+      relative_image_path: testCase.relative_image_path,
+      variables_json: testCase.variables_json || '{}',
+      assertions_override_json: testCase.assertions_override_json ?? '',
+    }
     setRelativePath(testCase.relative_image_path)
     setAssertionsJson(testCase.assertions_override_json ?? '')
     setError(null)
     const suiteDefaults = buildDefaultVariablesJson(suiteDefinedVarKeys, suiteVarHints)
     const merged = mergeVariablesJson(testCase.variables_json || '{}', suiteDefaults)
     setVariablesJson(merged)
-    // 重置图片查看器 + 关闭 dirty 标记
+    // 重置图片查看器
     ivRef.current?.resetView()
-    dirtyRef.current = false
-    onDirtyChange?.(false)
+    // 关键修复：用"是否与原始 testCase 不一致"决定 dirty
+    // 补齐默认值会让 merged 与原始 variables_json 不同 → dirty=true → 翻页会保存
+    computeAndSetDirty(
+      testCase.relative_image_path,
+      merged,
+      testCase.assertions_override_json ?? '',
+    )
   }, [open, testCase.id])
 
   useEffect(() => {
@@ -104,7 +146,12 @@ export function CaseAnnotator(props: {
         variables_json: merged || '{}',
         assertions_override_json: assertionsJson,
       })
-      // 保存成功 -> 清 dirty
+      // 保存成功：更新原始快照 = 当前 state
+      originalRef.current = {
+        relative_image_path: relativePath,
+        variables_json: merged,
+        assertions_override_json: assertionsJson,
+      }
       dirtyRef.current = false
       onDirtyChange?.(false)
       onClose()
@@ -167,9 +214,8 @@ export function CaseAnnotator(props: {
               <input
                 value={relativePath}
                 onChange={(e) => {
-                  dirtyRef.current = true
-                  onDirtyChange?.(true)
                   setRelativePath(e.target.value)
+                  computeAndSetDirty(e.target.value, variablesJson, assertionsJson)
                 }}
               />
             </label>
@@ -179,9 +225,8 @@ export function CaseAnnotator(props: {
               <VariableBuilder
                 value={variablesJson}
                 onChange={(v) => {
-                  dirtyRef.current = true
-                  onDirtyChange?.(true)
                   setVariablesJson(v)
+                  computeAndSetDirty(relativePath, v, assertionsJson)
                 }}
                 knownKeys={suiteDefinedVarKeys}
                 suiteVarHints={suiteVarHints}
@@ -198,15 +243,11 @@ export function CaseAnnotator(props: {
               <AssertionBuilder
                 value={assertionsJson || '{"rules":[]}'}
                 onChange={(next) => {
-                  dirtyRef.current = true
-                  onDirtyChange?.(true)
                   // 用户清空/全部删除规则时，保持空串表示"沿用测试集默认"
                   const r = safeParseOrNull(next)
-                  if (!r || (Array.isArray(r.rules) && r.rules.length === 0)) {
-                    setAssertionsJson('')
-                  } else {
-                    setAssertionsJson(next)
-                  }
+                  const finalValue = !r || (Array.isArray(r.rules) && r.rules.length === 0) ? '' : next
+                  setAssertionsJson(finalValue)
+                  computeAndSetDirty(relativePath, variablesJson, finalValue)
                 }}
                 schemaFields={schemaFields}
                 varKeys={varKeys}
