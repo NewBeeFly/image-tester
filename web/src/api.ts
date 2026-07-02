@@ -146,6 +146,35 @@ export interface RunItemDetail extends TestRunItem {
   variables_json: string;
 }
 
+export type AssertionRule =
+  | { type: 'contains'; value: string; caseInsensitive?: boolean; negate?: boolean }
+  | { type: 'regex'; pattern: string; flags?: string }
+  | {
+      type: 'jsonPath';
+      path: string;
+      equalsCaseVar?: string;
+      equalsSuiteVar?: string;
+      equals?: string;
+      inList?: string[];
+      regex?: string;
+      numericEquals?: number;
+      arrayContainsAll?: unknown[];
+      arrayContainsAllCaseVar?: string;
+      arrayEqualsConst?: unknown[];
+      arrayEqualsCaseVar?: string;
+      arrayUnorderedEqualsConst?: unknown[];
+      arrayUnorderedEqualsCaseVar?: string;
+    }
+  | { type: 'customScript'; expression: string }
+  | {
+      type: 'llmJudge';
+      provider_profile_id: number;
+      model?: string | null;
+      params_json?: string | null;
+      system_prompt?: string | null;
+      user_prompt_template: string;
+    };
+
 export function imageUrl(suiteId: number, relativePath: string): string {
   const q = new URLSearchParams({ relative_path: relativePath });
   return `/api/test-suites/${suiteId}/image?${q.toString()}`;

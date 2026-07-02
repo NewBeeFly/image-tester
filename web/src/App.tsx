@@ -201,6 +201,7 @@ export default function App() {
           suites={suites}
           runs={runs}
           prompts={prompts}
+          providers={providers}
           onChange={() => void refreshAll()}
           onError={setError}
           onGoRun={(suiteId) => {
@@ -637,6 +638,7 @@ function SuitesSection(props: {
   suites: TestSuite[]
   runs: TestRun[]
   prompts: PromptProfile[]
+  providers: ProviderProfile[]
   onChange: () => void
   onError: (m: string | null) => void
   onGoRun: (suiteId: number) => void
@@ -1479,6 +1481,7 @@ function SuitesSection(props: {
             onChange={(next) => setSuiteForm({ ...suiteForm, default_assertions_json: next })}
             schemaFields={assertionFieldOptions}
             varKeys={suiteDefinedVarKeys}
+            providerProfiles={props.providers}
           />
         </div>
       </div>
@@ -1791,6 +1794,7 @@ function SuitesSection(props: {
                     }}
                     schemaFields={assertionFieldOptions}
                     varKeys={caseModalVarKeys}
+                    providerProfiles={props.providers}
                   />
                 </div>
               </div>

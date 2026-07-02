@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { AssertionRule, ProviderProfile } from '../api'
 import type { EditorMode } from './common'
 import { prettifyJson, safeParseJson } from './common'
 import { ModeTabs } from './ModeTabs'
@@ -38,6 +39,7 @@ export interface AssertionBuilderProps {
    * 应合并传入：测试集变量列表中声明的变量名 + 当前用例 variables 里已经填过的 key。
    */
   varKeys?: string[]
+  providerProfiles?: ProviderProfile[]
 }
 
 type SourceKind = 'fullText' | 'schema' | 'custom'
@@ -118,6 +120,7 @@ interface VisualRule {
 
 type EditorRule =
   | { kind: 'visual'; data: VisualRule }
+  | { kind: 'llmJudge'; data: AssertionRule & { type: 'llmJudge' } }
   | { kind: 'unknown'; raw: unknown }
 
 function emptyVisual(): VisualRule {
@@ -288,6 +291,19 @@ function toEditor(raw: unknown): EditorRule {
     }
     return { kind: 'visual', data: { ...base, op: 'fieldExists' } }
   }
+  if (type === 'llmJudge') {
+    return {
+      kind: 'llmJudge',
+      data: {
+        type: 'llmJudge',
+        provider_profile_id: Number(r.provider_profile_id ?? 0),
+        model: (r.model as string | null | undefined) ?? null,
+        params_json: (r.params_json as string | null | undefined) ?? null,
+        system_prompt: (r.system_prompt as string | null | undefined) ?? null,
+        user_prompt_template: String(r.user_prompt_template ?? ''),
+      },
+    }
+  }
   return { kind: 'unknown', raw }
 }
 
@@ -374,6 +390,8 @@ function editorToJson(rules: EditorRule[]): string {
     if (r.kind === 'visual') {
       const j = visualToJsonRule(r.data)
       if (j) out.push(j)
+    } else if (r.kind === 'llmJudge') {
+      out.push(r.data)
     } else {
       out.push(r.raw)
     }
@@ -382,7 +400,7 @@ function editorToJson(rules: EditorRule[]): string {
 }
 
 export function AssertionBuilder(props: AssertionBuilderProps) {
-  const { value, onChange, schemaFields = [], varKeys = [] } = props
+  const { value, onChange, schemaFields = [], varKeys = [], providerProfiles = [] } = props
   const [mode, setMode] = useState<EditorMode>('visual')
   const [rawJson, setRawJson] = useState(value || '{"rules":[]}')
   const [jsonError, setJsonError] = useState<string | null>(null)
@@ -480,6 +498,18 @@ export function AssertionBuilder(props: AssertionBuilderProps) {
                     onChange={(patch) => updateVisual(i, patch)}
                     onRemove={() => removeRule(i)}
                   />
+                ) : r.kind === 'llmJudge' ? (
+                  <LlmJudgeRuleRow
+                    key={i}
+                    rule={r.data}
+                    providerProfiles={providerProfiles}
+                    suiteVars={varKeys}
+                    onChange={(updated) => {
+                      const next = rules.map((rule, idx) => idx === i ? { kind: 'llmJudge' as const, data: updated } : rule)
+                      emitRules(next)
+                    }}
+                    onRemove={() => removeRule(i)}
+                  />
                 ) : (
                   <div className="abRuleRow abRuleRow--advanced" key={i}>
                     <span className="abAdvBadge">高级</span>
@@ -501,12 +531,177 @@ export function AssertionBuilder(props: AssertionBuilderProps) {
             <button type="button" className="btn btnGhost" onClick={addVisual}>
               + 新增规则
             </button>
+            <button
+              type="button"
+              className="btn btnGhost"
+              onClick={() => {
+                const newRule: AssertionRule & { type: 'llmJudge' } = {
+                  type: 'llmJudge',
+                  provider_profile_id: providerProfiles[0]?.id ?? 0,
+                  user_prompt_template: '',
+                }
+                emitRules([...rules, { kind: 'llmJudge', data: newRule }])
+              }}
+              disabled={providerProfiles.length === 0}
+            >
+              + LLM 判定
+            </button>
             <span className="muted" style={{ fontSize: 12 }}>
-              高级规则（customScript / llmJudge）请切到「JSON 原文」添加；这里可看/可删但不改。
+              高级规则（customScript）请切到「JSON 原文」添加；llmJudge 可直接在下方编辑。
             </span>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function VarToolbar({
+  vars,
+  onInsert,
+}: {
+  vars: string[]
+  onInsert: (v: string) => void
+}) {
+  const builtIns = ['modelOutput', 'visionOutput', 'lastRecognition']
+  const all = [...builtIns, ...vars.filter((v) => !builtIns.includes(v))]
+  return (
+    <div className="assertion-var-toolbar">
+      <span>插入变量：</span>
+      {all.map((v) => (
+        <button key={v} type="button" onClick={() => onInsert(v)}>
+          {v}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function LlmJudgeRuleRow({
+  rule,
+  onChange,
+  onRemove,
+  providerProfiles = [],
+  suiteVars = [],
+}: {
+  rule: AssertionRule & { type: 'llmJudge' }
+  onChange: (r: AssertionRule & { type: 'llmJudge' }) => void
+  onRemove: () => void
+  providerProfiles: ProviderProfile[]
+  suiteVars: string[]
+}) {
+  const systemRef = useRef<HTMLTextAreaElement>(null)
+  const userRef = useRef<HTMLTextAreaElement>(null)
+
+  const selected = providerProfiles.find((p) => p.id === rule.provider_profile_id)
+  const modelOptions = selected?.default_params_json
+    ? (() => {
+        try {
+          const models = JSON.parse(selected.default_params_json)?.available_models
+          return Array.isArray(models) ? models : []
+        } catch {
+          return []
+        }
+      })()
+    : []
+
+  const insertVar = (varName: string, target: 'system' | 'user') => {
+    const key = target === 'system' ? 'system_prompt' : 'user_prompt_template'
+    const textarea = target === 'system' ? systemRef : userRef
+    const el = textarea.current
+    if (!el) {
+      onChange({ ...rule, [key]: (rule[key] || '') + `var:${varName}` })
+      return
+    }
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const value = (rule[key] as string) || ''
+    const next = value.slice(0, start) + `var:${varName}` + value.slice(end)
+    onChange({ ...rule, [key]: next })
+    setTimeout(() => {
+      const pos = start + `var:${varName}`.length
+      el.setSelectionRange(pos, pos)
+      el.focus()
+    }, 0)
+  }
+
+  return (
+    <div className="assertion-card assertion-card--llm-judge">
+      <div className="assertion-card__header">
+        <span className="assertion-card__badge">LLM 判定</span>
+        <button type="button" className="assertion-card__remove" onClick={onRemove}>删除</button>
+      </div>
+
+      <label className="assertion-field">
+        <span>Provider / 判定模型</span>
+        <div className="assertion-field__row">
+          <select
+            value={rule.provider_profile_id || ''}
+            onChange={(e) =>
+              onChange({
+                ...rule,
+                provider_profile_id: Number(e.target.value),
+                model: null,
+              })
+            }
+          >
+            <option value="">选择 Provider</option>
+            {providerProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={rule.model ?? ''}
+            onChange={(e) => onChange({ ...rule, model: e.target.value || null })}
+          >
+            <option value="">默认模型</option>
+            {modelOptions.map((m: string) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </div>
+      </label>
+
+      <label className="assertion-field">
+        <span>覆盖参数 JSON</span>
+        <textarea
+          rows={3}
+          value={rule.params_json ?? ''}
+          onChange={(e) => onChange({ ...rule, params_json: e.target.value || null })}
+          placeholder='{"temperature": 0.1}'
+        />
+      </label>
+
+      <label className="assertion-field">
+        <span>系统提示词</span>
+        <div className="assertion-field__hint">
+          留空使用默认约束：要求模型只返回 {'{'}"pass": true/false, "reason": "..."{'}'}
+        </div>
+        <textarea
+          ref={systemRef}
+          rows={4}
+          value={rule.system_prompt ?? ''}
+          onChange={(e) => onChange({ ...rule, system_prompt: e.target.value || null })}
+          placeholder="你是一位结果判定员..."
+        />
+        <VarToolbar vars={suiteVars} onInsert={(v) => insertVar(v, 'system')} />
+      </label>
+
+      <label className="assertion-field">
+        <span>用户提示词模板</span>
+        <textarea
+          ref={userRef}
+          rows={6}
+          value={rule.user_prompt_template || ''}
+          onChange={(e) => onChange({ ...rule, user_prompt_template: e.target.value })}
+          placeholder="请判断以下模型输出是否符合期望：var:modelOutput"
+        />
+        <VarToolbar vars={suiteVars} onInsert={(v) => insertVar(v, 'user')} />
+      </label>
     </div>
   )
 }
