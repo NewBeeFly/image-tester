@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { config } from '../config.js';
 import { parseAssertionConfig } from '../assert/engine.js';
+import type { AssertionConfig } from '../model/types.js';
 import {
   bulkImportCasesSchema,
   resolveCaseMetadataSchema,
@@ -103,7 +104,14 @@ function validateOutputSchemaJson(raw: string | undefined | null): void {
 
 function validateAssertionConfigJson(raw: string | undefined | null): void {
   if (!raw || !raw.trim()) return;
-  const cfg = parseAssertionConfig(raw);
+  let cfg: AssertionConfig;
+  try {
+    cfg = parseAssertionConfig(raw);
+  } catch (e) {
+    const err = new Error(`断言配置 JSON 无效：${(e as Error).message}`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
   for (let i = 0; i < cfg.rules.length; i++) {
     const rule = cfg.rules[i];
     if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
