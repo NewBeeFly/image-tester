@@ -609,17 +609,18 @@ function LlmJudgeRuleRow({
     const key = target === 'system' ? 'system_prompt' : 'user_prompt_template'
     const textarea = target === 'system' ? systemRef : userRef
     const el = textarea.current
+    const placeholder = `{{var:${varName}}}`
     if (!el) {
-      onChange({ ...rule, [key]: (rule[key] || '') + `var:${varName}` })
+      onChange({ ...rule, [key]: (rule[key] || '') + placeholder })
       return
     }
     const start = el.selectionStart
     const end = el.selectionEnd
     const value = (rule[key] as string) || ''
-    const next = value.slice(0, start) + `var:${varName}` + value.slice(end)
+    const next = value.slice(0, start) + placeholder + value.slice(end)
     onChange({ ...rule, [key]: next })
     setTimeout(() => {
-      const pos = start + `var:${varName}`.length
+      const pos = start + placeholder.length
       el.setSelectionRange(pos, pos)
       el.focus()
     }, 0)
@@ -698,7 +699,7 @@ function LlmJudgeRuleRow({
           rows={6}
           value={rule.user_prompt_template || ''}
           onChange={(e) => onChange({ ...rule, user_prompt_template: e.target.value })}
-          placeholder="请判断以下模型输出是否符合期望：var:modelOutput"
+          placeholder="请判断以下模型输出是否符合期望：{{var:modelOutput}}"
         />
         <VarToolbar vars={suiteVars} onInsert={(v) => insertVar(v, 'user')} />
       </label>
