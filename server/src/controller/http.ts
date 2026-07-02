@@ -101,6 +101,34 @@ function validateOutputSchemaJson(raw: string | undefined | null): void {
   }
 }
 
+function validateLlmJudgeRule(rule: unknown, index: number): void {
+  if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则格式错误`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  const r = rule as Record<string, unknown>;
+  if (typeof r.provider_profile_id !== 'number' || !Number.isFinite(r.provider_profile_id) || r.provider_profile_id <= 0) {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则缺少合法的 provider_profile_id`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (typeof r.user_prompt_template !== 'string' || !r.user_prompt_template.trim()) {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 user_prompt_template 不能为空`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (r.params_json != null && typeof r.params_json === 'string' && r.params_json.trim()) {
+    try {
+      JSON.parse(r.params_json);
+    } catch {
+      const err = new Error(`第 ${index + 1} 条 LLM 判定规则 params_json 不是合法 JSON`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+  }
+}
+
 /** 托管在 testSuiteParentDir 下的子目录名（禁止路径分隔符等） */
 function sanitizeManagedSubdir(raw: string): string {
   const s = raw
@@ -219,7 +247,12 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
   app.post('/api/test-suites', async (req) => {
     const body = parseOrThrow(createTestSuiteSchema, req.body);
     if (body.default_assertions_json) {
-      parseAssertionConfig(body.default_assertions_json);
+      const cfg = parseAssertionConfig(body.default_assertions_json);
+      for (let i = 0; i < cfg.rules.length; i++) {
+        if (cfg.rules[i].type === 'llmJudge') {
+          validateLlmJudgeRule(cfg.rules[i], i);
+        }
+      }
     }
     validateGlobalVariablesJson(body.global_variables_json);
     let imageRoot: string;
@@ -246,7 +279,12 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     const id = Number((req.params as { id: string }).id);
     const body = parseOrThrow(updateTestSuiteSchema, req.body);
     if (body.default_assertions_json) {
-      parseAssertionConfig(body.default_assertions_json);
+      const cfg = parseAssertionConfig(body.default_assertions_json);
+      for (let i = 0; i < cfg.rules.length; i++) {
+        if (cfg.rules[i].type === 'llmJudge') {
+          validateLlmJudgeRule(cfg.rules[i], i);
+        }
+      }
     }
     validateGlobalVariablesJson(body.global_variables_json);
     const updated = suitesRepo.updateTestSuite(db, id, body);
@@ -314,7 +352,12 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     }
     resolveUnderRoot(suite.image_root, body.relative_image_path);
     if (body.assertions_override_json) {
-      parseAssertionConfig(body.assertions_override_json);
+      const cfg = parseAssertionConfig(body.assertions_override_json);
+      for (let i = 0; i < cfg.rules.length; i++) {
+        if (cfg.rules[i].type === 'llmJudge') {
+          validateLlmJudgeRule(cfg.rules[i], i);
+        }
+      }
     }
     return suitesRepo.insertTestCase(db, suiteId, body);
   });
@@ -332,7 +375,12 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     const nextPath = body.relative_image_path ?? cur.relative_image_path;
     resolveUnderRoot(suite.image_root, nextPath);
     if (body.assertions_override_json) {
-      parseAssertionConfig(body.assertions_override_json);
+      const cfg = parseAssertionConfig(body.assertions_override_json);
+      for (let i = 0; i < cfg.rules.length; i++) {
+        if (cfg.rules[i].type === 'llmJudge') {
+          validateLlmJudgeRule(cfg.rules[i], i);
+        }
+      }
     }
     return suitesRepo.updateTestCase(db, id, body);
   });
