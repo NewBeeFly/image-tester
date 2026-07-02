@@ -1866,7 +1866,6 @@ select.abInput {
 
 /* ===== AssertionBuilder · LLM 判定规则卡片 ===== */
 .assertion-card--llm-judge {
-  border-left: 4px solid #8b5cf6;
   border: 1px solid var(--border);
   border-left: 4px solid #8b5cf6;
   border-radius: 8px;
@@ -1923,7 +1922,7 @@ select.abInput {
 
 .assertion-field__hint {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .assertion-var-toolbar {
@@ -1937,12 +1936,12 @@ select.abInput {
 .assertion-var-toolbar button {
   font-size: 0.75rem;
   padding: 0.15rem 0.4rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border);
   border-radius: 0.25rem;
-  background: #f9fafb;
+  background: var(--panel-subtle);
   cursor: pointer;
 }
 
 .assertion-var-toolbar button:hover {
-  background: #f3f4f6;
+  background: var(--panel-edge);
 }
