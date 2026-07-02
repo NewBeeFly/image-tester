@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "init-db": "node dist/cli/init-database.js",
     "init-db:dev": "tsx src/cli/init-database.ts",
-    "test": "tsx --test tests/assert/llmJudge.test.ts"
+    "test": "tsx --test \"tests/**/*.test.ts\""
   },
   "keywords": [],
   "author": "",

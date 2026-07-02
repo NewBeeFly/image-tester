@@ -45,6 +45,8 @@ export function parseJudgePassResponse(text: string): { ok: boolean; detail: str
           detail: j.ok ? 'JSON.ok 为 true' : 'JSON.ok 为 false',
         };
       }
+      // JSON 中无 pass/ok 字段时，忽略该 JSON 块，继续按首行判断
+      t = t.replace(jsonBlock[0], '').trim();
     } catch {
       /* 继续走首行 */
     }
@@ -99,10 +101,9 @@ export async function evaluateLlmJudgeRule(
   const system = renderTextPlaceholders(rule.system_prompt?.trim() || DEFAULT_JUDGE_SYSTEM_PROMPT, vars);
   const user = renderTextPlaceholders(rule.user_prompt_template, vars);
 
-  const model = rule.model?.trim() || provider.default_model;
-  const extraParams = mergeParams(provider.default_params_json, rule.params_json ?? null);
-
   try {
+    const model = rule.model?.trim() || provider.default_model;
+    const extraParams = mergeParams(provider.default_params_json, rule.params_json ?? null);
     const result = await chatText(provider, {
       model,
       system,
