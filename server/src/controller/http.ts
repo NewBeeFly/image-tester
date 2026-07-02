@@ -101,6 +101,22 @@ function validateOutputSchemaJson(raw: string | undefined | null): void {
   }
 }
 
+function validateAssertionConfigJson(raw: string | undefined | null): void {
+  if (!raw || !raw.trim()) return;
+  const cfg = parseAssertionConfig(raw);
+  for (let i = 0; i < cfg.rules.length; i++) {
+    const rule = cfg.rules[i];
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+      const err = new Error(`第 ${i + 1} 条断言规则格式错误：必须是对象`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+    if ((rule as Record<string, unknown>).type === 'llmJudge') {
+      validateLlmJudgeRule(rule, i);
+    }
+  }
+}
+
 function validateLlmJudgeRule(rule: unknown, index: number): void {
   if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
     const err = new Error(`第 ${index + 1} 条 LLM 判定规则格式错误`);
@@ -118,7 +134,17 @@ function validateLlmJudgeRule(rule: unknown, index: number): void {
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
-  if (r.params_json != null && typeof r.params_json === 'string' && r.params_json.trim()) {
+  if (r.model != null && typeof r.model !== 'string') {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 model 必须是字符串`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (r.system_prompt != null && typeof r.system_prompt !== 'string') {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 system_prompt 必须是字符串`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (typeof r.params_json === 'string' && r.params_json.trim()) {
     try {
       JSON.parse(r.params_json);
     } catch {
@@ -247,12 +273,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
   app.post('/api/test-suites', async (req) => {
     const body = parseOrThrow(createTestSuiteSchema, req.body);
     if (body.default_assertions_json) {
-      const cfg = parseAssertionConfig(body.default_assertions_json);
-      for (let i = 0; i < cfg.rules.length; i++) {
-        if (cfg.rules[i].type === 'llmJudge') {
-          validateLlmJudgeRule(cfg.rules[i], i);
-        }
-      }
+      validateAssertionConfigJson(body.default_assertions_json);
     }
     validateGlobalVariablesJson(body.global_variables_json);
     let imageRoot: string;
@@ -279,12 +300,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     const id = Number((req.params as { id: string }).id);
     const body = parseOrThrow(updateTestSuiteSchema, req.body);
     if (body.default_assertions_json) {
-      const cfg = parseAssertionConfig(body.default_assertions_json);
-      for (let i = 0; i < cfg.rules.length; i++) {
-        if (cfg.rules[i].type === 'llmJudge') {
-          validateLlmJudgeRule(cfg.rules[i], i);
-        }
-      }
+      validateAssertionConfigJson(body.default_assertions_json);
     }
     validateGlobalVariablesJson(body.global_variables_json);
     const updated = suitesRepo.updateTestSuite(db, id, body);
@@ -352,12 +368,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     }
     resolveUnderRoot(suite.image_root, body.relative_image_path);
     if (body.assertions_override_json) {
-      const cfg = parseAssertionConfig(body.assertions_override_json);
-      for (let i = 0; i < cfg.rules.length; i++) {
-        if (cfg.rules[i].type === 'llmJudge') {
-          validateLlmJudgeRule(cfg.rules[i], i);
-        }
-      }
+      validateAssertionConfigJson(body.assertions_override_json);
     }
     return suitesRepo.insertTestCase(db, suiteId, body);
   });
@@ -375,12 +386,7 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
     const nextPath = body.relative_image_path ?? cur.relative_image_path;
     resolveUnderRoot(suite.image_root, nextPath);
     if (body.assertions_override_json) {
-      const cfg = parseAssertionConfig(body.assertions_override_json);
-      for (let i = 0; i < cfg.rules.length; i++) {
-        if (cfg.rules[i].type === 'llmJudge') {
-          validateLlmJudgeRule(cfg.rules[i], i);
-        }
-      }
+      validateAssertionConfigJson(body.assertions_override_json);
     }
     return suitesRepo.updateTestCase(db, id, body);
   });
