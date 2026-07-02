@@ -1,7 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { AssertionRule, ProviderProfile, TestRun } from '../model/types.js';
 import { chatText } from '../provider/index.js';
-import * as promptsRepo from '../repository/promptsRepo.js';
 import * as providersRepo from '../repository/providersRepo.js';
 import { renderTextPlaceholders } from '../utils/multimodalPrompt.js';
 import type { RuleResult } from './ruleResult.js';
@@ -12,15 +11,22 @@ function mergeParams(defaultJson: string, overrideJson: string | null): Record<s
   return { ...a, ...b };
 }
 
-const IMG_PH = /\{\{\s*img:/;
+const DEFAULT_JUDGE_SYSTEM_PROMPT = `你是一位结果判定员。请根据用户提供的【模型输出】和【期望信息】，判断模型输出是否符合期望。
+只输出 JSON，不要任何解释：{"pass": true/false, "reason": "简要原因"}`;
 
 /**
  * 解析判定模型输出：优先 JSON `{ "pass": true }`，否则看首行 PASS/FAIL 等。
  */
 export function parseJudgePassResponse(text: string): { ok: boolean; detail: string } {
-  const t = text.trim();
+  let t = text.trim();
   if (!t) {
     return { ok: false, detail: '判定模型输出为空' };
+  }
+
+  // 去掉 Markdown code block 包裹
+  const codeBlockMatch = t.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  if (codeBlockMatch) {
+    t = codeBlockMatch[1].trim();
   }
 
   const jsonBlock = t.match(/\{[\s\S]*\}/);
@@ -71,44 +77,30 @@ export async function evaluateLlmJudgeRule(
   caseVars: Record<string, string | string[]>,
   ctx: LlmJudgeContext,
 ): Promise<RuleResult> {
-  const judgePrompt = promptsRepo.getPromptProfile(ctx.db, rule.judge_prompt_profile_id);
-  if (!judgePrompt) {
-    return { rule, ok: false, detail: `判定提示词模板 #${rule.judge_prompt_profile_id} 不存在` };
+  if (!rule.provider_profile_id) {
+    return { rule, ok: false, detail: 'LLM 判定规则缺少 provider_profile_id' };
+  }
+  if (!rule.user_prompt_template?.trim()) {
+    return { rule, ok: false, detail: 'LLM 判定 user 提示词模板为空' };
   }
 
-  if (IMG_PH.test(judgePrompt.system_prompt) || IMG_PH.test(judgePrompt.user_prompt_template)) {
-    return {
-      rule,
-      ok: false,
-      detail: '判定模板不支持 {{img:}}，请使用纯文本与 {{var:键}}（如 {{var:modelOutput}}）',
-    };
-  }
-
-  const provider = rule.judge_provider_profile_id
-    ? providersRepo.getProviderProfile(ctx.db, rule.judge_provider_profile_id)
-    : ctx.runProvider;
+  const provider = providersRepo.getProviderProfile(ctx.db, rule.provider_profile_id);
   if (!provider) {
-    return {
-      rule,
-      ok: false,
-      detail: rule.judge_provider_profile_id
-        ? `判定 Provider #${rule.judge_provider_profile_id} 不存在`
-        : '运行 Provider 不存在',
-    };
+    return { rule, ok: false, detail: `判定 Provider #${rule.provider_profile_id} 不存在` };
   }
 
-  const vars: Record<string, string> = {
+  const vars: Record<string, string | string[]> = {
     ...caseVars,
     modelOutput: visionOutputText,
     lastRecognition: visionOutputText,
     visionOutput: visionOutputText,
   };
 
-  const system = renderTextPlaceholders(judgePrompt.system_prompt, vars);
-  const user = renderTextPlaceholders(judgePrompt.user_prompt_template, vars);
+  const system = renderTextPlaceholders(rule.system_prompt?.trim() || DEFAULT_JUDGE_SYSTEM_PROMPT, vars);
+  const user = renderTextPlaceholders(rule.user_prompt_template, vars);
 
-  const model = rule.judge_model_override?.trim() || provider.default_model;
-  const extraParams = mergeParams(provider.default_params_json, rule.judge_params_override_json ?? null);
+  const model = rule.model?.trim() || provider.default_model;
+  const extraParams = mergeParams(provider.default_params_json, rule.params_json ?? null);
 
   try {
     const result = await chatText(provider, {
@@ -122,9 +114,7 @@ export async function evaluateLlmJudgeRule(
     return {
       rule,
       ok: parsed.ok,
-      detail: parsed.ok
-        ? `LLM 判定：${parsed.detail}；回复摘录：${snippet}`
-        : `LLM 判定：${parsed.detail}；回复摘录：${snippet}`,
+      detail: `LLM 判定：${parsed.detail}；回复摘录：${snippet}`,
     };
   } catch (e) {
     return {
