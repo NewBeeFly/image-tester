@@ -23,3 +23,5 @@ data/test-suites/**
 *.sqlite
 .DS_Store
 server/data/*.db
+# Git worktrees
+.worktrees/
