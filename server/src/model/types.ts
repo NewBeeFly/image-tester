@@ -117,14 +117,18 @@ export type AssertionRule =
     }
   | { type: 'customScript'; expression: string }
   | {
-      /** 调用另一套提示词（纯文本，勿使用 {{img:}}）让大模型判定是否通过，例如门头名称语义是否一致 */
+      /** 调用纯文本大模型判定输出是否合规 */
       type: 'llmJudge';
-      /** 判定专用的提示词模板 ID（与主任务视觉提示词分开） */
-      judge_prompt_profile_id: number;
-      /** 可选；默认与当前运行使用同一 Provider */
-      judge_provider_profile_id?: number;
-      judge_model_override?: string | null;
-      judge_params_override_json?: string | null;
+      /** 判定用 Provider 档案 ID */
+      provider_profile_id: number;
+      /** 覆盖 Provider 默认模型；空/null 则使用 Provider 默认 */
+      model?: string | null;
+      /** 覆盖请求参数 JSON，如 {"temperature":0.1} */
+      params_json?: string | null;
+      /** 系统提示词；空/null 则使用默认约束模板 */
+      system_prompt?: string | null;
+      /** 用户提示词模板，支持 var:xxx */
+      user_prompt_template: string;
     };
 
 export interface AssertionConfig {
