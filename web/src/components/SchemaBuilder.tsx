@@ -111,9 +111,11 @@ export function SchemaBuilder(props: {
   onChange: (next: string) => void
   /** 可选：系统提示词，用于「最终系统提示预览」 */
   systemPrompt?: string
+  /** 极简模式：只显示字段列表和 Schema 片段预览，隐藏模式切换/指令输入/最终预览 */
+  minimal?: boolean
 }) {
-  const { value, onChange, systemPrompt } = props
-  const [mode, setMode] = useState<EditorMode>('visual')
+  const { value, onChange, systemPrompt, minimal } = props
+  const [mode, setMode] = useState<EditorMode>(minimal ? 'visual' : 'visual')
   const [doc, setDoc] = useState<SchemaDoc>(() => parseDoc(value || '{"fields":[]}'))
   const [rawJson, setRawJson] = useState(value || '{"fields":[]}')
   const [jsonError, setJsonError] = useState<string | null>(null)
@@ -188,14 +190,16 @@ export function SchemaBuilder(props: {
   )
 
   return (
-    <div className="sb">
-      <ModeTabs
-        mode={mode}
-        onChange={setMode}
-        onPrettify={handlePrettify}
-        jsonError={jsonError}
-        leftHint="定义模型应返回的 JSON 字段；运行时会自动拼入系统提示"
-      />
+    <div className={minimal ? 'sb sb--minimal' : 'sb'}>
+      {!minimal ? (
+        <ModeTabs
+          mode={mode}
+          onChange={setMode}
+          onPrettify={handlePrettify}
+          jsonError={jsonError}
+          leftHint="定义模型应返回的 JSON 字段；运行时会自动拼入系统提示"
+        />
+      ) : null}
       {mode === 'json' ? (
         <textarea
           className="modalTextarea"
@@ -205,17 +209,19 @@ export function SchemaBuilder(props: {
         />
       ) : (
         <div className="sbVisual">
-          <div className="sbInstruction">
-            <label className="muted" style={{ fontSize: 12 }}>
-              附加中文说明（可选，默认会提示"请严格按下面 JSON 结构返回"）
-            </label>
-            <input
-              className="sbInstructionInput"
-              value={doc.instruction ?? ''}
-              placeholder="例如：只输出 JSON，不要包裹代码块"
-              onChange={(e) => updateInstruction(e.target.value)}
-            />
-          </div>
+          {!minimal ? (
+            <div className="sbInstruction">
+              <label className="muted" style={{ fontSize: 12 }}>
+                附加中文说明（可选，默认会提示"请严格按下面 JSON 结构返回"）
+              </label>
+              <input
+                className="sbInstructionInput"
+                value={doc.instruction ?? ''}
+                placeholder="例如：只输出 JSON，不要包裹代码块"
+                onChange={(e) => updateInstruction(e.target.value)}
+              />
+            </div>
+          ) : null}
 
           <div className="sbFieldsHeader">
             <strong>字段列表</strong>
@@ -295,19 +301,23 @@ export function SchemaBuilder(props: {
             </details>
           ) : null}
 
-          <div className="sbPreviewToggle">
-            <button
-              type="button"
-              className="btn btnGhost"
-              onClick={() => setShowFinalPreview((v) => !v)}
-              disabled={!systemPrompt && !hasFields}
-              title={!systemPrompt ? '未提供系统提示词时仅预览 Schema 片段' : ''}
-            >
-              {showFinalPreview ? '收起最终系统提示预览' : '展开：预览最终系统提示（系统提示 + Schema 合并后）'}
-            </button>
-          </div>
-          {showFinalPreview ? (
-            <pre className="sbPreviewBlock sbPreviewBlock--final">{finalPreview}</pre>
+          {!minimal ? (
+            <>
+              <div className="sbPreviewToggle">
+                <button
+                  type="button"
+                  className="btn btnGhost"
+                  onClick={() => setShowFinalPreview((v) => !v)}
+                  disabled={!systemPrompt && !hasFields}
+                  title={!systemPrompt ? '未提供系统提示词时仅预览 Schema 片段' : ''}
+                >
+                  {showFinalPreview ? '收起最终系统提示预览' : '展开：预览最终系统提示（系统提示 + Schema 合并后）'}
+                </button>
+              </div>
+              {showFinalPreview ? (
+                <pre className="sbPreviewBlock sbPreviewBlock--final">{finalPreview}</pre>
+              ) : null}
+            </>
           ) : null}
         </div>
       )}

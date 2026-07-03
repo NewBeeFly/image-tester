@@ -709,6 +709,7 @@ function LlmJudgeRuleRow({
           value={rule.output_schema_json ?? ''}
           onChange={(next) => onChange({ ...rule, output_schema_json: next || null })}
           systemPrompt={rule.system_prompt ?? ''}
+          minimal
         />
       </label>
 
