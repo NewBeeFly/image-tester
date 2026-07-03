@@ -94,8 +94,6 @@ export async function evaluateLlmJudgeRule(
   const vars: Record<string, string | string[]> = {
     ...caseVars,
     modelOutput: visionOutputText,
-    lastRecognition: visionOutputText,
-    visionOutput: visionOutputText,
   };
 
   const system = renderTextPlaceholders(rule.system_prompt?.trim() || DEFAULT_JUDGE_SYSTEM_PROMPT, vars);

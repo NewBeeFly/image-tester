@@ -563,7 +563,7 @@ function VarToolbar({
   vars: string[]
   onInsert: (v: string) => void
 }) {
-  const builtIns = ['modelOutput', 'visionOutput', 'lastRecognition']
+  const builtIns = ['modelOutput']
   const all = [...builtIns, ...vars.filter((v) => !builtIns.includes(v))]
   return (
     <div className="assertion-var-toolbar">
