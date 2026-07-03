@@ -21,6 +21,21 @@ function mergeMeta(a: CaseMetadata, b: CaseMetadata): CaseMetadata {
 }
 
 /**
+ * 稀疏合并：仅当 b 中某一层存在显式键时才覆盖 a。
+ * 用于数据库/UI 值覆盖文件侧车/清单值，同时避免数据库里空的 images 对象把文件里的图片别名清掉。
+ */
+function sparseMergeMeta(a: CaseMetadata, b: CaseMetadata): CaseMetadata {
+  return {
+    variables: Object.keys(b.variables).length > 0
+      ? { ...a.variables, ...b.variables }
+      : a.variables,
+    images: Object.keys(b.images).length > 0
+      ? { ...a.images, ...b.images }
+      : a.images,
+  };
+}
+
+/**
  * 与 `relativeImagePath` 同目录、同主文件名、扩展名为 `.json` 的侧车路径（posix）。
  * 例：`photos/a.png` → `photos/a.json`
  */
@@ -171,11 +186,11 @@ export function parseSuiteGlobalVariables(raw: string | null | undefined): Recor
 /**
  * 合并元数据（用于导入写库与断言里的 caseVars）：
  * 1. **测试集全局变量**（`global_variables_json`）作最底层基底（最低优先）
- * 2. 数据库里的 `variables_json` 覆盖
- * 3. `image_root/` 根清单（key 为完整相对路径，如 `subdir/image.jpg`）**覆盖**同名键
- * 4. 图片所在子目录的清单（key 为裸文件名，如 `image.jpg`）**再覆盖**
+ * 2. `image_root/` 根清单（key 为完整相对路径，如 `subdir/image.jpg`）
+ * 3. 图片所在子目录的清单（key 为裸文件名，如 `image.jpg`）
  *    ——这样整文件夹上传后，子目录里的 metadata.json 也能被解析到
- * 5. 与主图同名的侧车 `.json`**最高优先**（sidecar > 子目录清单 > 根清单 > 库值 > 全局）
+ * 4. 与主图同名的侧车 `.json`（sidecar > 子目录清单 > 根清单 > 全局）
+ * 5. **数据库/UI 里的 `variables_json` 最高优先**，用户在界面编辑的值应覆盖文件里的旧值
  */
 export function resolveMergedCaseMetadata(
   imageRoot: string,
@@ -188,7 +203,6 @@ export function resolveMergedCaseMetadata(
 
   const baseVars = parseSuiteGlobalVariables(suiteGlobalVarsJson ?? '{}');
   let merged: CaseMetadata = { variables: { ...baseVars }, images: {} };
-  merged = mergeMeta(merged, parseCaseMetadataJson(dbOrUiVariablesJson));
 
   // 1. 根清单：用完整相对路径匹配
   const rootManifest = manifestMapForDir(absRoot);
@@ -209,7 +223,7 @@ export function resolveMergedCaseMetadata(
     }
   }
 
-  // 3. 侧车 JSON（最高优先级）
+  // 3. 侧车 JSON
   const sideRel = sidecarRelativePathForImage(rel);
   try {
     const sideAbs = resolveUnderRoot(imageRoot, sideRel);
@@ -220,6 +234,9 @@ export function resolveMergedCaseMetadata(
   } catch {
     /* 侧车路径非法则跳过 */
   }
+
+  // 4. 数据库/UI 值最高优先；稀疏合并避免空 images 对象把文件里的图片别名清掉
+  merged = sparseMergeMeta(merged, parseCaseMetadataJson(dbOrUiVariablesJson));
 
   return merged;
 }
