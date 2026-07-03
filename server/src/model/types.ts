@@ -127,8 +127,11 @@ export type AssertionRule =
       params_json?: string | null;
       /** 系统提示词；空/null 则使用默认判定员角色 */
       system_prompt?: string | null;
-      /** 返回格式约束 JSON，会拼接到系统提示词；空/null 则使用默认 */
-      output_format_json?: string | null;
+      /**
+       * 返回值 Schema JSON（符合 `OutputSchema`），会拼接到系统提示词；
+       * 空/null 则使用默认 pass/reason 结构。
+       */
+      output_schema_json?: string | null;
       /** 用户提示词模板，支持 {{var:xxx}} */
       user_prompt_template: string;
     };

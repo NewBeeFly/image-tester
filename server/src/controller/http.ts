@@ -152,16 +152,22 @@ function validateLlmJudgeRule(rule: unknown, index: number): void {
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
-  if (r.output_format_json != null && typeof r.output_format_json !== 'string') {
-    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_format_json 必须是字符串`);
+  if (r.output_schema_json != null && typeof r.output_schema_json !== 'string') {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_schema_json 必须是字符串`);
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
-  if (typeof r.output_format_json === 'string' && r.output_format_json.trim()) {
+  if (typeof r.output_schema_json === 'string' && r.output_schema_json.trim()) {
+    let schema: unknown;
     try {
-      JSON.parse(r.output_format_json);
+      schema = JSON.parse(r.output_schema_json);
     } catch {
-      const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_format_json 不是合法 JSON`);
+      const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_schema_json 不是合法 JSON`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema) || !Array.isArray((schema as Record<string, unknown>).fields)) {
+      const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_schema_json 必须包含 fields 数组`);
       (err as Error & { statusCode?: number }).statusCode = 400;
       throw err;
     }

@@ -172,7 +172,8 @@ export type AssertionRule =
       model?: string | null;
       params_json?: string | null;
       system_prompt?: string | null;
-      output_format_json?: string | null;
+      /** 返回值 Schema JSON，运行时拼接到系统提示词 */
+      output_schema_json?: string | null;
       user_prompt_template: string;
     };
 

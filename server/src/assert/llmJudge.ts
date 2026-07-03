@@ -3,6 +3,7 @@ import type { AssertionRule, ProviderProfile, TestRun } from '../model/types.js'
 import { chatText } from '../provider/index.js';
 import * as providersRepo from '../repository/providersRepo.js';
 import { renderTextPlaceholders } from '../utils/multimodalPrompt.js';
+import { applySchemaToSystemPrompt } from '../utils/outputSchema.js';
 import type { RuleResult } from './ruleResult.js';
 
 function mergeParams(defaultJson: string, overrideJson: string | null): Record<string, unknown> {
@@ -12,7 +13,12 @@ function mergeParams(defaultJson: string, overrideJson: string | null): Record<s
 }
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `你是一位结果判定员。请根据用户提供的【模型输出】和【期望信息】，判断模型输出是否符合期望。`;
-const DEFAULT_OUTPUT_FORMAT = '{"pass": true, "reason": "简要原因"}';
+const DEFAULT_OUTPUT_SCHEMA_JSON = JSON.stringify({
+  fields: [
+    { name: 'pass', type: 'boolean', required: true, description: '是否合格' },
+    { name: 'reason', type: 'string', required: true, description: '简要原因' },
+  ],
+});
 
 /**
  * 解析判定模型输出：优先 JSON `{ "pass": true }`，否则看首行 PASS/FAIL 等。
@@ -97,8 +103,8 @@ export async function evaluateLlmJudgeRule(
   };
 
   const systemBase = renderTextPlaceholders(rule.system_prompt?.trim() || DEFAULT_JUDGE_SYSTEM_PROMPT, vars);
-  const outputFormat = rule.output_format_json?.trim() || DEFAULT_OUTPUT_FORMAT;
-  const system = `${systemBase}\n只输出 JSON，不要任何解释：${outputFormat}`;
+  const outputSchemaJson = rule.output_schema_json?.trim() || DEFAULT_OUTPUT_SCHEMA_JSON;
+  const system = applySchemaToSystemPrompt(systemBase, outputSchemaJson);
   const user = renderTextPlaceholders(rule.user_prompt_template, vars);
 
   try {
