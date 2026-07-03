@@ -539,7 +539,7 @@ export function AssertionBuilder(props: AssertionBuilderProps) {
                 const newRule: AssertionRule & { type: 'llmJudge' } = {
                   type: 'llmJudge',
                   provider_profile_id: providerProfiles[0]?.id ?? 0,
-                  output_format_json: '{"pass": true/false, "reason": "简要原因"}',
+                  output_format_json: '{"pass": true, "reason": "简要原因"}',
                   user_prompt_template: '',
                 }
                 emitRules([...rules, { kind: 'llmJudge', data: newRule }])
@@ -703,7 +703,7 @@ function LlmJudgeRuleRow({
           rows={2}
           value={rule.output_format_json ?? ''}
           onChange={(e) => onChange({ ...rule, output_format_json: e.target.value || null })}
-          placeholder='{"pass": true/false, "reason": "简要原因"}'
+          placeholder='{"pass": true, "reason": "简要原因"}'
         />
       </label>
       

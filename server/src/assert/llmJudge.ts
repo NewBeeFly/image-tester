@@ -12,7 +12,7 @@ function mergeParams(defaultJson: string, overrideJson: string | null): Record<s
 }
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `你是一位结果判定员。请根据用户提供的【模型输出】和【期望信息】，判断模型输出是否符合期望。`;
-const DEFAULT_OUTPUT_FORMAT = '{"pass": true/false, "reason": "简要原因"}';
+const DEFAULT_OUTPUT_FORMAT = '{"pass": true, "reason": "简要原因"}';
 
 /**
  * 解析判定模型输出：优先 JSON `{ "pass": true }`，否则看首行 PASS/FAIL 等。

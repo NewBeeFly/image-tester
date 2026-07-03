@@ -47,7 +47,7 @@ type AssertionRule =
       "provider_profile_id": 1,
       "model": "gpt-4o-mini",
       "system_prompt": "你是一位结果判定员。请根据【模型输出】和【期望信息】判断是否合格。",
-      "output_format_json": "{\"pass\": true/false, \"reason\": \"简要原因\"}",
+      "output_format_json": "{\"pass\": true, \"reason\": \"简要原因\"}",
       "user_prompt_template": "模型输出：\n{{var:modelOutput}}\n\n期望钢印存在：{{var:exists_steel_seal}}\n\n请判断模型输出是否与期望一致。"
     }
   ]
@@ -85,7 +85,7 @@ type AssertionRule =
 当用户未填写 `output_format_json` 时，后端追加默认返回格式约束：
 
 ```text
-只输出 JSON，不要任何解释：{"pass": true/false, "reason": "简要原因"}
+只输出 JSON，不要任何解释：{"pass": true, "reason": "简要原因"}
 ```
 
 运行时最终的 system prompt 为 `system_base + "\n只输出 JSON，不要任何解释：" + output_format`。
@@ -103,7 +103,7 @@ type AssertionRule =
 2. **判定模型**（可选）：input，placeholder「留空使用 Provider 默认模型」。
 3. **请求参数**（可选，默认折叠）：textarea，placeholder `{"temperature": 0.1}`。
 4. **System 提示词**（可选）：textarea，min-height 120px；提示「留空使用默认判定员角色」。
-5. **返回格式约束**（可选）：textarea，默认值 `{"pass": true/false, "reason": "简要原因"}`；提示「会拼接到系统提示词中，可修改 reason 描述」。
+5. **返回格式约束**（可选）：textarea，默认值 `{"pass": true, "reason": "简要原因"}`；提示「会拼接到系统提示词中，可修改 reason 描述」。
 6. **User 提示词模板**（必填）：textarea，min-height 160px，可拖拽拉高。
 7. **可用变量提示**：在 system/user prompt 下方显示变量标签，如 `{{var:modelOutput}}`、`{{var:exists_steel_seal}}`，点击可插入到光标处。
 
