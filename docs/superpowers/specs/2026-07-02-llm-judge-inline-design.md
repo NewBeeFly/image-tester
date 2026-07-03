@@ -31,7 +31,8 @@ type AssertionRule =
       provider_profile_id: number;        // 必填：选择已有 Provider 档案
       model?: string | null;               // 可选：覆盖 Provider 默认模型
       params_json?: string | null;         // 可选：覆盖请求参数 JSON
-      system_prompt?: string | null;       // 可选：不填时使用默认约束模板
+      system_prompt?: string | null;       // 可选：不填时使用默认判定员角色
+      output_format_json?: string | null;  // 可选：返回格式约束，拼接到系统提示词
       user_prompt_template: string;        // 必填：判定提示词模板
     };
 ```
@@ -45,7 +46,8 @@ type AssertionRule =
       "type": "llmJudge",
       "provider_profile_id": 1,
       "model": "gpt-4o-mini",
-      "system_prompt": "你是一位结果判定员。请根据【模型输出】和【期望信息】判断是否合格。只输出 JSON：{\"pass\": true/false, \"reason\": \"简要原因\"}",
+      "system_prompt": "你是一位结果判定员。请根据【模型输出】和【期望信息】判断是否合格。",
+      "output_format_json": "{\"pass\": true/false, \"reason\": \"简要原因\"}",
       "user_prompt_template": "模型输出：\n{{var:modelOutput}}\n\n期望钢印存在：{{var:exists_steel_seal}}\n\n请判断模型输出是否与期望一致。"
     }
   ]
@@ -58,10 +60,13 @@ type AssertionRule =
 2. **确定模型**：`rule.model?.trim() || provider.default_model`。
 3. **合并参数**：分别解析 `provider.default_params_json` 和 `rule.params_json`（若存在且非空），后者覆盖前者。
 4. **注入变量**：
-   - 基础变量：`modelOutput`、`visionOutput`、`lastRecognition`（均指向视觉模型输出文本）。
+   - 基础变量：`modelOutput`（指向视觉模型输出文本）。
    - 用例变量：来自合并后的 `variables_json`、清单、侧车。
-   - 注意：`system_prompt` 为空字符串时视为未填写，使用默认模板。
-5. **渲染提示词**：使用 `renderTextPlaceholders` 替换 `{{var:xxx}}`。
+   - 注意：`system_prompt` 为空字符串时视为未填写，使用默认判定员角色提示；`output_format_json` 为空时视为未填写，使用默认返回格式约束。
+5. **渲染提示词**：
+   - 取 `system_prompt` 或默认判定员角色作为 system base。
+   - 将 `output_format_json` 或默认返回格式约束拼接到 system base 末尾，并带上前缀「只输出 JSON，不要任何解释：」。
+   - 使用 `renderTextPlaceholders` 替换 `{{var:xxx}}`。
 6. **调用判定模型**：走 `chatText` 纯文本接口。
 7. **解析结果**：
    - 先去掉可能的 Markdown code block 包裹（` ```json ... ``` ` / ` ``` ... ``` `）。
@@ -71,12 +76,19 @@ type AssertionRule =
 
 ### 默认 System Prompt
 
-当用户未填写 `system_prompt` 时，后端自动拼接：
+当用户未填写 `system_prompt` 时，后端使用默认判定员角色：
 
 ```text
 你是一位结果判定员。请根据用户提供的【模型输出】和【期望信息】，判断模型输出是否符合期望。
+```
+
+当用户未填写 `output_format_json` 时，后端追加默认返回格式约束：
+
+```text
 只输出 JSON，不要任何解释：{"pass": true/false, "reason": "简要原因"}
 ```
+
+运行时最终的 system prompt 为 `system_base + "\n只输出 JSON，不要任何解释：" + output_format`。
 
 ## 前端交互设计
 
@@ -90,9 +102,10 @@ type AssertionRule =
 1. **判定 Provider**（必填）：下拉选择现有 Provider 档案。
 2. **判定模型**（可选）：input，placeholder「留空使用 Provider 默认模型」。
 3. **请求参数**（可选，默认折叠）：textarea，placeholder `{"temperature": 0.1}`。
-4. **System 提示词**（可选）：textarea，min-height 120px；上方提供「恢复默认」按钮。
-5. **User 提示词模板**（必填）：textarea，min-height 160px，可拖拽拉高。
-6. **可用变量提示**：在 user prompt 下方显示变量标签，如 `{{var:modelOutput}}`、`{{var:exists_steel_seal}}`，点击可插入到光标处。
+4. **System 提示词**（可选）：textarea，min-height 120px；提示「留空使用默认判定员角色」。
+5. **返回格式约束**（可选）：textarea，默认值 `{"pass": true/false, "reason": "简要原因"}`；提示「会拼接到系统提示词中，可修改 reason 描述」。
+6. **User 提示词模板**（必填）：textarea，min-height 160px，可拖拽拉高。
+7. **可用变量提示**：在 system/user prompt 下方显示变量标签，如 `{{var:modelOutput}}`、`{{var:exists_steel_seal}}`，点击可插入到光标处。
 
 ### 校验
 

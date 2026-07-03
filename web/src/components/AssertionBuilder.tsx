@@ -300,6 +300,7 @@ function toEditor(raw: unknown): EditorRule {
         model: (r.model as string | null | undefined) ?? null,
         params_json: (r.params_json as string | null | undefined) ?? null,
         system_prompt: (r.system_prompt as string | null | undefined) ?? null,
+        output_format_json: (r.output_format_json as string | null | undefined) ?? null,
         user_prompt_template: String(r.user_prompt_template ?? ''),
       },
     }
@@ -538,6 +539,7 @@ export function AssertionBuilder(props: AssertionBuilderProps) {
                 const newRule: AssertionRule & { type: 'llmJudge' } = {
                   type: 'llmJudge',
                   provider_profile_id: providerProfiles[0]?.id ?? 0,
+                  output_format_json: '{"pass": true/false, "reason": "简要原因"}',
                   user_prompt_template: '',
                 }
                 emitRules([...rules, { kind: 'llmJudge', data: newRule }])
@@ -616,7 +618,7 @@ function LlmJudgeRuleRow({
     }
     const start = el.selectionStart
     const end = el.selectionEnd
-    const value = (rule[key] as string) || ''
+    const value = String(rule[key] ?? '')
     const next = value.slice(0, start) + placeholder + value.slice(end)
     onChange({ ...rule, [key]: next })
     setTimeout(() => {
@@ -680,7 +682,7 @@ function LlmJudgeRuleRow({
       <label className="assertion-field">
         <span>系统提示词</span>
         <div className="assertion-field__hint">
-          留空使用默认约束：要求模型只返回 {'{'}"pass": true/false, "reason": "..."{'}'}
+          留空使用默认判定员角色；下方「返回格式约束」会拼接到系统提示词末尾
         </div>
         <textarea
           ref={systemRef}
@@ -691,7 +693,20 @@ function LlmJudgeRuleRow({
         />
         <VarToolbar vars={suiteVars} onInsert={(v) => insertVar(v, 'system')} />
       </label>
-
+      
+      <label className="assertion-field">
+        <span>返回格式约束</span>
+        <div className="assertion-field__hint">
+          会拼接到系统提示词中，要求模型按此 JSON 返回；可修改 reason 的描述
+        </div>
+        <textarea
+          rows={2}
+          value={rule.output_format_json ?? ''}
+          onChange={(e) => onChange({ ...rule, output_format_json: e.target.value || null })}
+          placeholder='{"pass": true/false, "reason": "简要原因"}'
+        />
+      </label>
+      
       <label className="assertion-field">
         <span>用户提示词模板</span>
         <textarea

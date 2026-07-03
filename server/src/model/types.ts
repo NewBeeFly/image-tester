@@ -125,9 +125,11 @@ export type AssertionRule =
       model?: string | null;
       /** 覆盖请求参数 JSON，如 {"temperature":0.1} */
       params_json?: string | null;
-      /** 系统提示词；空/null 则使用默认约束模板 */
+      /** 系统提示词；空/null 则使用默认判定员角色 */
       system_prompt?: string | null;
-      /** 用户提示词模板，支持 var:xxx */
+      /** 返回格式约束 JSON，会拼接到系统提示词；空/null 则使用默认 */
+      output_format_json?: string | null;
+      /** 用户提示词模板，支持 {{var:xxx}} */
       user_prompt_template: string;
     };
 

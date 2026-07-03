@@ -152,6 +152,20 @@ function validateLlmJudgeRule(rule: unknown, index: number): void {
     (err as Error & { statusCode?: number }).statusCode = 400;
     throw err;
   }
+  if (r.output_format_json != null && typeof r.output_format_json !== 'string') {
+    const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_format_json 必须是字符串`);
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (typeof r.output_format_json === 'string' && r.output_format_json.trim()) {
+    try {
+      JSON.parse(r.output_format_json);
+    } catch {
+      const err = new Error(`第 ${index + 1} 条 LLM 判定规则 output_format_json 不是合法 JSON`);
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+  }
   if (typeof r.params_json === 'string' && r.params_json.trim()) {
     try {
       JSON.parse(r.params_json);

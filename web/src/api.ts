@@ -172,6 +172,7 @@ export type AssertionRule =
       model?: string | null;
       params_json?: string | null;
       system_prompt?: string | null;
+      output_format_json?: string | null;
       user_prompt_template: string;
     };
 
