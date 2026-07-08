@@ -109,6 +109,27 @@ export function openDatabase(): Database.Database {
     );
 
     CREATE INDEX IF NOT EXISTS idx_run_items_run ON test_run_items(run_id);
+
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '新对话',
+      provider_profile_id INTEGER NOT NULL REFERENCES provider_profiles(id),
+      model TEXT,
+      agent_name TEXT NOT NULL DEFAULT 'optimizer',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      tool_calls_json TEXT,
+      tool_call_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages(session_id);
   `);
 
   addColumnIfMissing(
