@@ -11,13 +11,15 @@ export function getProviderProfile(db: Database.Database, id: number): ProviderP
 
 export function insertProviderProfile(
   db: Database.Database,
-  row: Omit<ProviderProfile, 'id' | 'created_at' | 'default_params_json'> & { default_params_json?: string },
+  row: Omit<ProviderProfile, 'id' | 'created_at' | 'default_params_json' | 'context_window' | 'streaming'> & { default_params_json?: string; context_window?: number; streaming?: number },
 ): ProviderProfile {
   const defaultParams = row.default_params_json ?? '{}';
+  const contextWindow = row.context_window ?? 256000;
+  const streaming = row.streaming ?? 1;
   const info = db
     .prepare(
-      `INSERT INTO provider_profiles (name, provider_type, base_url, api_key_env, default_model, default_params_json)
-       VALUES (@name, @provider_type, @base_url, @api_key_env, @default_model, @default_params_json)`,
+      `INSERT INTO provider_profiles (name, provider_type, base_url, api_key_env, default_model, default_params_json, context_window, streaming)
+       VALUES (@name, @provider_type, @base_url, @api_key_env, @default_model, @default_params_json, @context_window, @streaming)`,
     )
     .run({
       name: row.name,
@@ -26,6 +28,8 @@ export function insertProviderProfile(
       api_key_env: row.api_key_env,
       default_model: row.default_model,
       default_params_json: defaultParams,
+      context_window: contextWindow,
+      streaming,
     });
   return getProviderProfile(db, Number(info.lastInsertRowid))!;
 }
@@ -34,7 +38,7 @@ export function updateProviderProfile(
   db: Database.Database,
   id: number,
   patch: Partial<
-    Pick<ProviderProfile, 'name' | 'provider_type' | 'base_url' | 'api_key_env' | 'default_model' | 'default_params_json'>
+    Pick<ProviderProfile, 'name' | 'provider_type' | 'base_url' | 'api_key_env' | 'default_model' | 'default_params_json' | 'context_window' | 'streaming'>
   >,
 ): ProviderProfile | undefined {
   const cur = getProviderProfile(db, id);
@@ -47,7 +51,9 @@ export function updateProviderProfile(
       base_url = @base_url,
       api_key_env = @api_key_env,
       default_model = @default_model,
-      default_params_json = @default_params_json
+      default_params_json = @default_params_json,
+      context_window = @context_window,
+      streaming = @streaming
      WHERE id = @id`,
   ).run({
     id,
@@ -57,6 +63,8 @@ export function updateProviderProfile(
     api_key_env: next.api_key_env,
     default_model: next.default_model,
     default_params_json: next.default_params_json,
+    context_window: next.context_window,
+    streaming: next.streaming,
   });
   return getProviderProfile(db, id);
 }

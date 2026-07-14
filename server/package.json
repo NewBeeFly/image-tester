@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-agent-assets.js",
     "start": "node dist/index.js",
     "init-db": "node dist/cli/init-database.js",
     "init-db:dev": "tsx src/cli/init-database.ts",
@@ -19,12 +19,17 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/multipart": "^9.4.0",
     "@fastify/static": "^9.0.0",
+    "@langchain/core": "^1.2.1",
+    "@langchain/langgraph": "^1.4.7",
+    "@langchain/openai": "^1.5.3",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.8.4",
     "jsonpath-plus": "^10.4.0",
+    "langsmith": "^0.8.1",
     "openai": "^6.32.0",
     "p-limit": "^7.3.0",
+    "sharp": "^0.35.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -88,4 +88,11 @@ export const config = {
     .filter(Boolean),
   customScriptTimeoutMs: Number(process.env.CUSTOM_SCRIPT_TIMEOUT_MS ?? 300),
   maxRegexPatternLength: Number(process.env.MAX_REGEX_PATTERN_LENGTH ?? 500),
+  /** LangSmith 追踪配置 */
+  langsmith: {
+    tracing: process.env.LANGSMITH_TRACING === 'true',
+    apiKey: process.env.LANGSMITH_API_KEY || '',
+    project: process.env.LANGSMITH_PROJECT || 'image-tester',
+    endpoint: process.env.LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com',
+  },
 };

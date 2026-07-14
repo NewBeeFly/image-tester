@@ -9,6 +9,8 @@ export const createProviderProfileSchema = z.object({
   api_key_env: z.string().min(1),
   default_model: z.string().min(1),
   default_params_json: z.string().optional(),
+  context_window: z.number().int().min(1).optional(),
+  streaming: z.number().int().min(0).max(1).optional(),
 });
 
 export const updateProviderProfileSchema = createProviderProfileSchema.partial();

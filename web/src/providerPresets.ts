@@ -9,6 +9,8 @@ export const PROVIDER_FORM_PRESETS: Record<
     api_key_env: string
     default_model: string
     default_params_json: string
+    context_window: number
+    streaming?: number
     baseUrlHint?: string
   }
 > = {
@@ -18,6 +20,8 @@ export const PROVIDER_FORM_PRESETS: Record<
     api_key_env: 'OPENAI_API_KEY',
     default_model: 'gpt-4o-mini',
     default_params_json: '{\n  "temperature": 0.2\n}',
+    context_window: 256000,
+    streaming: 1,
   },
   dashscope: {
     suggestedName: '阿里云 DashScope',
@@ -25,6 +29,8 @@ export const PROVIDER_FORM_PRESETS: Record<
     api_key_env: 'DASHSCOPE_API_KEY',
     default_model: 'qwen-vl-plus',
     default_params_json: '{\n  "temperature": 0.2\n}',
+    context_window: 256000,
+    streaming: 1,
   },
   volcengine: {
     suggestedName: '火山引擎方舟',
@@ -32,6 +38,8 @@ export const PROVIDER_FORM_PRESETS: Record<
     api_key_env: 'VOLCENGINE_ARK_API_KEY',
     default_model: 'doubao-seed-1-6-vision-250815',
     default_params_json: '{\n  "temperature": 0.2\n}',
+    context_window: 256000,
+    streaming: 1,
     baseUrlHint:
       '地域以控制台为准：若接入点不在北京，请将 URL 中的 cn-beijing 换成控制台所示地域。',
   },

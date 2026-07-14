@@ -150,6 +150,18 @@ export function openDatabase(): Database.Database {
     'ref_prompt_id',
     'ref_prompt_id INTEGER',
   );
+  addColumnIfMissing(
+    db,
+    'provider_profiles',
+    'context_window',
+    'context_window INTEGER DEFAULT 256000',
+  );
+  addColumnIfMissing(
+    db,
+    'provider_profiles',
+    'streaming',
+    'streaming INTEGER DEFAULT 1',
+  );
 
   return db;
 }

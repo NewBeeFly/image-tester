@@ -1,0 +1,24 @@
+{
+  "name": "optimizer",
+  "displayName": "提示词优化助手",
+  "defaultModel": null,
+  "enabledSkills": [
+    "report-analysis",
+    "report-optimization",
+    "prompt-optimization",
+    "assertion-debug"
+  ],
+  "globalSkills": ["image-tester-context"],
+  "enabledTools": [
+    "get_test_run_report",
+    "get_run_items",
+    "get_run_item_detail",
+    "compare_runs",
+    "get_prompt_profile",
+    "update_prompt_profile",
+    "list_test_suites",
+    "list_test_runs",
+    "list_prompt_profiles",
+    "load_image_base64"
+  ]
+}

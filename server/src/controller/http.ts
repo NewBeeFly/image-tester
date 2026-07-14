@@ -233,6 +233,8 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
       api_key_env: body.api_key_env,
       default_model: body.default_model,
       default_params_json: body.default_params_json,
+      context_window: body.context_window,
+      streaming: body.streaming,
     });
   });
 

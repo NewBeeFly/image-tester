@@ -27,6 +27,7 @@ import {
 } from './api'
 import { PROVIDER_FORM_PRESETS } from './providerPresets'
 import { AssertionBuilder, type SchemaFieldOption } from './components/AssertionBuilder'
+import { AgentChatPanel } from './components/AgentChatPanel'
 import { CaseAnnotator } from './components/CaseAnnotator'
 import { ImageViewer } from './components/ImageViewer'
 import { SchemaBuilder } from './components/SchemaBuilder'
@@ -101,6 +102,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [runPresetSuiteId, setRunPresetSuiteId] = useState<number | null>(null)
   const [reportPresetRunId, setReportPresetRunId] = useState<number | null>(null)
+  const [showAgent, setShowAgent] = useState(false)
 
   const [providers, setProviders] = useState<ProviderProfile[]>([])
   const [prompts, setPrompts] = useState<PromptProfile[]>([])
@@ -243,6 +245,21 @@ export default function App() {
           onError={setError}
         />
       ) : null}
+
+      {/* Agent Floating Widget */}
+      {showAgent ? (
+        <div className="agentPanelWrapper">
+          <AgentChatPanel providers={providers} onClose={() => setShowAgent(false)} />
+        </div>
+      ) : null}
+      <button
+        className="agentFab"
+        onClick={() => setShowAgent(!showAgent)}
+        title="AI 助手"
+        type="button"
+      >
+        {showAgent ? '✕' : '🤖'}
+      </button>
     </div>
   )
 }
@@ -256,6 +273,8 @@ function emptyProviderForm() {
     api_key_env: p.api_key_env,
     default_model: p.default_model,
     default_params_json: p.default_params_json,
+    context_window: p.context_window,
+    streaming: 1,
   }
 }
 
@@ -281,6 +300,8 @@ function ProvidersSection(props: {
       api_key_env: row.api_key_env,
       default_model: row.default_model,
       default_params_json: row.default_params_json || '{}',
+      context_window: row.context_window || 256000,
+      streaming: row.streaming ?? 1,
     })
   }
 
@@ -289,6 +310,8 @@ function ProvidersSection(props: {
     try {
       const body = {
         ...form,
+        context_window: Number(form.context_window) || 256000,
+        streaming: Number(form.streaming) ?? 1,
         default_params_json: form.default_params_json || '{}',
       }
       if (editingId != null) {
@@ -328,6 +351,8 @@ function ProvidersSection(props: {
                 api_key_env: p.api_key_env,
                 default_model: p.default_model,
                 default_params_json: p.default_params_json,
+                context_window: p.context_window,
+                streaming: p.streaming ?? 1,
               })
             }}
           >
@@ -361,6 +386,26 @@ function ProvidersSection(props: {
             onChange={(e) => setForm({ ...form, default_model: e.target.value })}
           />
         </div>
+      </div>
+      <div className="row">
+        <label>上下文窗口（token，用于 Agent 上下文统计）</label>
+        <input
+          type="number"
+          min={4096}
+          value={form.context_window}
+          onChange={(e) => setForm({ ...form, context_window: Number(e.target.value) })}
+        />
+      </div>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          id="provider-streaming"
+          type="checkbox"
+          checked={form.streaming !== 0}
+          onChange={(e) => setForm({ ...form, streaming: e.target.checked ? 1 : 0 })}
+        />
+        <label htmlFor="provider-streaming" style={{ margin: 0 }}>
+          启用流式输出（关闭可修复部分代理 Tool Calling 丢失工具名的问题）
+        </label>
       </div>
       <div className="row">
         <label>默认参数 JSON（会合并到每次请求，可被运行页覆盖）</label>

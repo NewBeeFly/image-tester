@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { config } from './config.js';
 import { registerRoutes } from './controller/http.js';
+import { registerAgentRoutes } from './agent/agentRoutes.js';
 import { openDatabase } from './db.js';
 
 async function main() {
@@ -20,9 +21,15 @@ async function main() {
 
   const db = openDatabase();
   registerRoutes(app, db);
+  registerAgentRoutes(app, db);
 
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`API 已启动：http://${config.host}:${config.port}`);
+  app.log.info(
+    config.langsmith.tracing
+      ? `LangSmith 追踪已启用，project=${config.langsmith.project}, endpoint=${config.langsmith.endpoint}`
+      : 'LangSmith 追踪未启用（如需开启请设置 LANGSMITH_TRACING=true 和 LANGSMITH_API_KEY）',
+  );
   app.log.info(
     '关键路由：POST /api/vision/preview（单图检测）、POST /api/test-suites/:id/upload（multipart 上传图片/JSON）、GET /api/test-suites/:id/scan-images；若前端 404 请确认连的是本进程端口。',
   );

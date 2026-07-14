@@ -12,6 +12,10 @@ export interface ProviderProfile {
   api_key_env: string;
   default_model: string;
   default_params_json: string;
+  /** 模型上下文窗口大小（token），用于 agent 上下文统计与压缩 */
+  context_window: number;
+  /** 是否启用 LangChain 流式输出；部分代理（如 aihub）流式 Tool Calling 有缺陷，可关闭 */
+  streaming: number;
   created_at: string;
 }
 
