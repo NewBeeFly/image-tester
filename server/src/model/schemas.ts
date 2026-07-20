@@ -91,3 +91,14 @@ export const visionPreviewSchema = z.object({
   params_effective_json: z.string().nullable().optional(),
   params_override_json: z.string().nullable().optional(),
 });
+
+export const localVisionPreviewFieldsSchema = z.object({
+  metadata_json: z.string().optional(),
+  provider_profile_id: z.coerce.number().int().positive(),
+  system_prompt: z.string().optional(),
+  user_prompt_template: z.string().min(1),
+  output_schema_json: z.string().nullable().optional(),
+  model_override: z.string().nullable().optional(),
+  params_effective_json: z.string().nullable().optional(),
+  params_override_json: z.string().nullable().optional(),
+});

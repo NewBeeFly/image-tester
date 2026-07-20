@@ -13,6 +13,7 @@ import {
   createTestCaseSchema,
   createTestRunSchema,
   createTestSuiteSchema,
+  localVisionPreviewFieldsSchema,
   updatePromptProfileSchema,
   updateProviderProfileSchema,
   updateTestCaseSchema,
@@ -28,7 +29,7 @@ import { cleanupCaseAssets } from '../service/caseAssetCleanup.js';
 import { cleanupSuiteAssets } from '../service/suiteAssetCleanup.js';
 import { cleanupSuiteConsistency } from '../service/suiteConsistencyCleanup.js';
 import { normalizeUploadSubdir, writeSuiteAsset } from '../service/suiteAssetUpload.js';
-import { runVisionPreview } from '../service/visionPreviewService.js';
+import { runLocalVisionPreview, runVisionPreview } from '../service/visionPreviewService.js';
 import { cancelRun, startTestRun, subscribeRun } from '../service/testRunService.js';
 import { mimeFromPath } from '../utils/mime.js';
 import {
@@ -220,6 +221,40 @@ export function registerRoutes(app: FastifyInstance, db: Database.Database) {
   app.post('/api/vision/preview', async (req) => {
     const body = parseOrThrow(visionPreviewSchema, req.body);
     return runVisionPreview(db, body);
+  });
+
+  app.post('/api/vision/preview-upload', async (req) => {
+    if (!req.isMultipart()) {
+      const err = new Error('请使用 multipart/form-data 上传图片');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const fields: Record<string, string> = {};
+    let image: { buffer: Buffer; mimetype: string } | null = null;
+    const parts = req.parts();
+    for await (const part of parts) {
+      if (part.type === 'field') {
+        fields[part.fieldname] = String(part.value ?? '');
+        continue;
+      }
+      const buffer = await part.toBuffer();
+      if (part.fieldname !== 'image') continue;
+      if (image) {
+        const err = new Error('本地图片模式一次只能选择一张图片');
+        (err as Error & { statusCode?: number }).statusCode = 400;
+        throw err;
+      }
+      image = { buffer, mimetype: part.mimetype };
+    }
+    if (!image) {
+      const err = new Error('请选择一张本地图片');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+
+    const body = parseOrThrow(localVisionPreviewFieldsSchema, fields);
+    return runLocalVisionPreview(db, { ...body, image });
   });
 
   app.get('/api/provider-profiles', async () => providersRepo.listProviderProfiles(db));

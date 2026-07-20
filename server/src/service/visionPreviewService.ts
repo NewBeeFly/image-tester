@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { chatVision } from '../provider/index.js';
 import * as providersRepo from '../repository/providersRepo.js';
 import * as suitesRepo from '../repository/suitesRepo.js';
-import { buildVisionRequestParts } from '../utils/multimodalPrompt.js';
+import { buildLocalImageRequestParts, buildVisionRequestParts } from '../utils/multimodalPrompt.js';
 import { parseSuiteGlobalVariables } from '../utils/caseMetadataMerge.js';
 import { applySchemaToSystemPrompt } from '../utils/outputSchema.js';
 import { resolveUnderRoot } from '../utils/pathSafe.js';
@@ -24,6 +24,26 @@ export interface VisionPreviewBody {
   params_effective_json?: string | null;
   params_override_json?: string | null;
 }
+
+export interface LocalVisionPreviewBody {
+  metadata_json?: string;
+  provider_profile_id: number;
+  system_prompt?: string;
+  user_prompt_template: string;
+  output_schema_json?: string | null;
+  model_override?: string | null;
+  params_effective_json?: string | null;
+  params_override_json?: string | null;
+  image: { buffer: Buffer; mimetype: string };
+}
+
+const LOCAL_IMAGE_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+]);
 
 function mergeParams(defaultJson: string, overrideJson: string | null): Record<string, unknown> {
   const a = JSON.parse(defaultJson || '{}') as Record<string, unknown>;
@@ -94,4 +114,49 @@ export async function runVisionPreview(db: Database.Database, body: VisionPrevie
     raw: visionResult.raw,
     variables_snapshot: variables,
   };
+}
+
+export async function runLocalVisionPreview(db: Database.Database, body: LocalVisionPreviewBody) {
+  if (!LOCAL_IMAGE_MIME_TYPES.has(body.image.mimetype)) {
+    const err = new Error('仅支持图片文件（PNG / JPEG / WebP / GIF / BMP）');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+  if (body.image.buffer.length === 0) {
+    const err = new Error('图片文件不能为空');
+    (err as Error & { statusCode?: number }).statusCode = 400;
+    throw err;
+  }
+
+  const provider = providersRepo.getProviderProfile(db, body.provider_profile_id);
+  if (!provider) {
+    const err = new Error('Provider 档案不存在');
+    (err as Error & { statusCode?: number }).statusCode = 404;
+    throw err;
+  }
+
+  const systemWithSchema = applySchemaToSystemPrompt(body.system_prompt ?? '', body.output_schema_json ?? '');
+  const { user, variables } = buildLocalImageRequestParts(
+    body.user_prompt_template,
+    body.metadata_json?.trim() || '{}',
+    body.image.buffer,
+    body.image.mimetype,
+  );
+  const model = body.model_override?.trim() || provider.default_model;
+  const eff = body.params_effective_json?.trim();
+  let extraParams: Record<string, unknown>;
+  if (eff) {
+    try {
+      extraParams = JSON.parse(eff) as Record<string, unknown>;
+    } catch {
+      const err = new Error('请求参数 JSON（params_effective_json）格式不正确');
+      (err as Error & { statusCode?: number }).statusCode = 400;
+      throw err;
+    }
+  } else {
+    extraParams = mergeParams(provider.default_params_json, body.params_override_json ?? null);
+  }
+
+  const visionResult = await chatVision(provider, { model, system: systemWithSchema, user, extraParams });
+  return { text: visionResult.text, raw: visionResult.raw, variables_snapshot: variables };
 }
