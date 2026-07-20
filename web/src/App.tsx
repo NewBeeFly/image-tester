@@ -32,7 +32,7 @@ import { CaseAnnotator } from './components/CaseAnnotator'
 import { ImageViewer } from './components/ImageViewer'
 import { SchemaBuilder } from './components/SchemaBuilder'
 import { VariableBuilder } from './components/VariableBuilder'
-import { SuiteVarListBuilder, extractSuiteVarFields, extractSuiteVarNames, extractSuiteVarValueHints } from './components/SuiteVarListBuilder'
+import { SuiteVarListBuilder, extractSuiteVarNames, extractSuiteVarValueHints } from './components/SuiteVarListBuilder'
 import { parseSuiteVariables, safeParseJson } from './components/common'
 
 type Tab = 'providers' | 'prompts' | 'suites' | 'preview' | 'run' | 'report'
@@ -1039,6 +1039,7 @@ function SuitesSection(props: {
         managed_subdir: '',
         default_assertions_json: row.default_assertions_json,
         global_variables_json: row.global_variables_json || '{}',
+        ref_prompt_id: null,
       })
       props.onChange()
     } catch (e) {
@@ -1919,6 +1920,9 @@ function PreviewSection(props: {
   const [paramsEffective, setParamsEffective] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<VisionPreviewResponse | null>(null)
+  const [previewMode, setPreviewMode] = useState<'suite' | 'local'>('suite')
+  const [localImage, setLocalImage] = useState<File | null>(null)
+  const [localImageUrl, setLocalImageUrl] = useState('')
   /** 选图下拉：`c:用例id` 或 `f:encodeURIComponent(相对路径)` */
   const [imagePick, setImagePick] = useState<string>('')
   const [scannedPaths, setScannedPaths] = useState<string[]>([])
@@ -1939,6 +1943,16 @@ function PreviewSection(props: {
       .then((r) => setScannedPaths(Array.isArray(r.paths) ? r.paths : []))
       .catch(() => setScannedPaths([]))
   }, [suiteId])
+
+  useEffect(() => {
+    if (!localImage) {
+      setLocalImageUrl('')
+      return
+    }
+    const url = URL.createObjectURL(localImage)
+    setLocalImageUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [localImage])
 
   useEffect(() => {
     if (!providerId) {
@@ -1998,16 +2012,17 @@ function PreviewSection(props: {
 
   async function send() {
     const missing: string[] = []
-    if (!suiteId) missing.push('请在右侧选择「测试集」（用来确定图片根目录 image_root）')
+    if (previewMode === 'suite' && !suiteId) missing.push('请在右侧选择「测试集」（用来确定图片根目录 image_root）')
     if (!providerId) missing.push('请选择 Provider')
     const pathTrim = relativePath.trim()
-    if (!pathTrim) missing.push('请填写「主图相对路径」')
+    if (previewMode === 'suite' && !pathTrim) missing.push('请填写「主图相对路径」')
+    if (previewMode === 'local' && !localImage) missing.push('请选择一张本地图片')
     if (!userPrompt.trim()) missing.push('「用户提示词」不能为空')
     if (missing.length) {
       props.onError(missing.join(' '))
       return
     }
-    if (looksLikeAbsolutePath(pathTrim)) {
+    if (previewMode === 'suite' && looksLikeAbsolutePath(pathTrim)) {
       const root = props.suites.find((s) => s.id === suiteId)?.image_root ?? ''
       props.onError(
         `主图路径请填「相对测试集 image_root」的路径，不要填本机绝对路径（如 /Users/...）。` +
@@ -2030,9 +2045,7 @@ function PreviewSection(props: {
     setLoading(true)
     setResult(null)
     try {
-      const data = await postJson<VisionPreviewResponse>('/api/vision/preview', {
-        suite_id: suiteId,
-        relative_image_path: relativePath.trim(),
+      const payload = {
         metadata_json: metadataJson.trim() || '{}',
         provider_profile_id: providerId,
         system_prompt: systemPrompt,
@@ -2042,7 +2055,21 @@ function PreviewSection(props: {
         model_override: modelOverride.trim() ? modelOverride.trim() : null,
         params_effective_json: pe || null,
         params_override_json: null,
-      })
+      }
+      const data = previewMode === 'local'
+        ? await (() => {
+            const form = new FormData()
+            form.append('image', localImage!)
+            for (const [key, value] of Object.entries(payload)) {
+              if (value != null) form.append(key, String(value))
+            }
+            return postFormData<VisionPreviewResponse>('/api/vision/preview-upload', form)
+          })()
+        : await postJson<VisionPreviewResponse>('/api/vision/preview', {
+            ...payload,
+            suite_id: suiteId,
+            relative_image_path: pathTrim,
+          })
       setResult(data)
     } catch (e) {
       props.onError((e as Error).message)
@@ -2051,8 +2078,9 @@ function PreviewSection(props: {
     }
   }
 
-  const previewImg =
-    suiteId && relativePath.trim() && !looksLikeAbsolutePath(relativePath)
+  const previewImg = previewMode === 'local'
+    ? localImageUrl
+    : suiteId && relativePath.trim() && !looksLikeAbsolutePath(relativePath)
       ? imageUrl(Number(suiteId), relativePath.trim())
       : ''
   const activePreviewSuite = suiteId ? props.suites.find((s) => s.id === suiteId) : undefined
@@ -2197,7 +2225,7 @@ function PreviewSection(props: {
               <img className="previewStageImg" alt="当前主图预览" src={previewImg} />
             ) : (
               <div className="previewStagePlaceholder">
-                在<strong>右侧栏</strong>选择测试集与主图路径，图片将显示在此处。
+                在<strong>右侧栏</strong>选择图片来源，图片将显示在此处。
               </div>
             )}
           </div>
@@ -2274,6 +2302,25 @@ function PreviewSection(props: {
           ) : (
             <div className="previewRailBody">
               <div className="previewWbField">
+                <label>图片来源</label>
+                <select value={previewMode} onChange={(e) => setPreviewMode(e.target.value as 'suite' | 'local')}>
+                  <option value="suite">测试集图片</option>
+                  <option value="local">当前电脑图片（不保存）</option>
+                </select>
+              </div>
+              {previewMode === 'local' ? (
+                <div className="previewWbField">
+                  <label>本地图片</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+                    onChange={(e) => setLocalImage(e.target.files?.[0] ?? null)}
+                  />
+                  <p className="previewWbHint">支持 PNG / JPEG / WebP / GIF / BMP，最大 50MB；仅用于本次识别，不会保存。</p>
+                </div>
+              ) : (
+                <>
+              <div className="previewWbField">
                 <label>测试集</label>
                 <select value={suiteId} onChange={(e) => setSuiteId(e.target.value ? Number(e.target.value) : '')}>
                   <option value="">请选择</option>
@@ -2345,6 +2392,8 @@ function PreviewSection(props: {
                   按主图生成元数据
                 </button>
               </div>
+                </>
+              )}
               <div className="previewWbField">
                 <label>元数据 JSON</label>
                 <textarea value={metadataJson} onChange={(e) => setMetadataJson(e.target.value)} rows={8} className="mono" />
