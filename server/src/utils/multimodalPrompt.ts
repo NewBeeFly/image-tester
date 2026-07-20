@@ -170,6 +170,50 @@ export function normalizeRoleContent(parts: VisionContentPart[]): string | Visio
 }
 
 /**
+ * Builds a user message from an image selected in the browser. The image never
+ * receives a suite-relative path and exists only for this request.
+ */
+export function buildLocalImageRequestParts(
+  userTemplate: string,
+  metadataJson: string,
+  imageBuffer: Buffer,
+  mime: string,
+): { user: VisionContentPart[]; variables: Record<string, string | string[]> } {
+  const meta = parseCaseMetadataJson(metadataJson);
+  const imagePart: VisionContentPart = {
+    type: 'image_url',
+    image_url: { url: `data:${mime};base64,${imageBuffer.toString('base64')}` },
+  };
+  const imageMatches = [...userTemplate.matchAll(/\{\{\s*img:([\w.-]+)\s*\}\}/g)];
+
+  for (const match of imageMatches) {
+    if (match[1] !== 'main') {
+      throw new Error('本地图片模式只支持 {{img:main}}');
+    }
+  }
+
+  if (imageMatches.length === 0) {
+    const text = renderTextPlaceholders(userTemplate, meta.variables);
+    const user: VisionContentPart[] = [];
+    if (text.trim()) user.push({ type: 'text', text });
+    user.push(imagePart);
+    return { user, variables: meta.variables };
+  }
+
+  const user: VisionContentPart[] = [];
+  let last = 0;
+  for (const match of imageMatches) {
+    const before = userTemplate.slice(last, match.index);
+    if (before) user.push({ type: 'text', text: renderTextPlaceholders(before, meta.variables) });
+    user.push(imagePart);
+    last = (match.index ?? 0) + match[0].length;
+  }
+  const tail = userTemplate.slice(last);
+  if (tail) user.push({ type: 'text', text: renderTextPlaceholders(tail, meta.variables) });
+  return { user: mergeAdjacentTextParts(user), variables: meta.variables };
+}
+
+/**
  * 从提示词模板 + 用例元数据组装 system/user 消息；user 中至少含一张图。
  *
  * @param options.globalVariables 测试集全局变量，作为最底层兜底（被用例 variables 覆盖）
